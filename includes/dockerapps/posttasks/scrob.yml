@@ -1,0 +1,41 @@
+---
+- name: Deploy db-{{ pgrole }}
+  community.docker.docker_container:
+    name: "db-{{ pgrole }}"
+    recreate: true
+    image: postgres:16-alpine
+    pull: true
+    volumes:
+      - "{{ settings.storage }}/docker/{{ lookup('env','USER') }}/{{ pgrole }}/db-{{ pgrole }}:/var/lib/postgresql/data:rw"
+    env:
+      POSTGRES_USER: "{{ pgrole }}"
+      POSTGRES_PASSWORD: "{{ pgrole }}"
+      POSTGRES_DB: "{{ pgrole }}"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U {{ pgrole }} -d {{ pgrole }}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart_policy: unless-stopped
+    networks:
+      - name: traefik_proxy
+    state: started
+
+- name: Wait for db-{{ pgrole }} readiness
+  ansible.builtin.command: "docker exec db-{{ pgrole }} pg_isready -U {{ pgrole }} -d {{ pgrole }}"
+  register: pg_ready_result
+  until: pg_ready_result.rc == 0
+  retries: 30
+  delay: 2
+  changed_when: false
+
+- name: Connect {{ pgrole }} to traefik_proxy
+  community.docker.docker_network:
+    name: traefik_proxy
+    connected:
+      - "{{ pgrole }}"
+    appends: yes
+
+- name: Restart {{ pgrole }}
+  ansible.builtin.command: "docker restart {{ pgrole }}"
+  changed_when: false

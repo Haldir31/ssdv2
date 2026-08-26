@@ -1,0 +1,12 @@
+---
+pgrole: 'scrob'
+intport: '7330'
+image: 'bellamy/scrob:latest'
+pg_volumes:
+  - "{{ settings.storage }}/docker/{{ lookup('env','USER') }}/{{ pgrole }}/config:/app/backend/data:rw"
+pg_env:
+  PUID: "{{ lookup('env','MYUID') }}"
+  PGID: "{{ lookup('env','MYGID') }}"
+  TZ: 'Europe/Paris'
+  DATABASE_URL: "postgresql+asyncpg://{{ pgrole }}:{{ pgrole }}@db-{{ pgrole }}:5432/{{ pgrole }}"
+  SECRET_KEY: "{{ scrob_secret_key }}"

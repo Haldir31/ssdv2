@@ -1,0 +1,24 @@
+---
+- name: Créer le dossier scrob
+  ansible.builtin.file:
+    path: "{{ settings.storage }}/docker/{{ lookup('env','USER') }}/{{ pgrole }}"
+    state: directory
+    mode: "0755"
+
+- name: Vérifier si la clé secrète existe
+  ansible.builtin.stat:
+    path: "{{ settings.storage }}/docker/{{ lookup('env','USER') }}/{{ pgrole }}/secret_key"
+  register: scrob_secret_key_file
+
+- name: Générer la clé secrète persistante
+  ansible.builtin.shell: "openssl rand -hex 32 > {{ settings.storage }}/docker/{{ lookup('env','USER') }}/{{ pgrole }}/secret_key && chmod 0600 {{ settings.storage }}/docker/{{ lookup('env','USER') }}/{{ pgrole }}/secret_key"
+  when: not scrob_secret_key_file.stat.exists
+
+- name: Lire la clé secrète
+  ansible.builtin.slurp:
+    src: "{{ settings.storage }}/docker/{{ lookup('env','USER') }}/{{ pgrole }}/secret_key"
+  register: scrob_secret_key_raw
+
+- name: Définir la clé secrète
+  ansible.builtin.set_fact:
+    scrob_secret_key: "{{ scrob_secret_key_raw.content | b64decode | trim }}"
