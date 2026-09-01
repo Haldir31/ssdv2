@@ -23,6 +23,10 @@ env:
   PORT: "8001"
   NODE_ENV: production
   DATABASE_URL: __APP_DATA_DIR__/local.db
+  # SSR proxy target in hooks.server.js (it strips the /api/v1 prefix, so include
+  # it here). Browser-side calls hit /api/v1 on the same host -> Traefik ->
+  # ssd-backend directly; the WebSocket (/api/v1/ws/<uid>) too.
+  VITE_API_BASE_URL: http://127.0.0.1:8091/api/v1
   # no ORIGIN — see ssd-frontend.yml
   PROTOCOL_HEADER: x-forwarded-proto
   HOST_HEADER: x-forwarded-host
