@@ -49,3 +49,34 @@ if [ -f "${CATALOG_EP}" ] && ! grep -q 'SERVICES_AVAILABLE_PATH' "${CATALOG_EP}"
     "${CATALOG_EP}"
   echo -e " ${GREEN}* services.json endpoint : SERVICES_AVAILABLE_PATH honoré${NC}"
 fi
+
+# seedbox-form.svelte : le use:enhance a un onResult custom qui n'appelle jamais
+# update() -> l'état "tainted" du superform n'est jamais remis à zéro après une
+# sauvegarde réussie, d'où le "Leave page? Changes may not be saved" en changeant
+# d'onglet alors que "Settings saved!" vient de s'afficher.
+SB_FORM="${SRC}/src/lib/forms/seedbox-form.svelte"
+if [ -f "${SB_FORM}" ] && ! grep -q 'taintedMessage: false' "${SB_FORM}"; then
+  /usr/bin/python3 - "${SB_FORM}" <<'PYEOF'
+import sys
+p = sys.argv[1]
+t = open(p).read()
+t = t.replace(
+    '  const form = superForm(data, {\n'
+    '    validators: zodClient(seedboxSettingsSchema),\n'
+    '    dataType: "json",\n'
+    '  });',
+    '  const form = superForm(data, {\n'
+    '    validators: zodClient(seedboxSettingsSchema),\n'
+    '    dataType: "json",\n'
+    '    taintedMessage: false,  // [ssd-native]\n'
+    '  });', 1)
+t = t.replace(
+    '        onResult: ({ result }) => {\n'
+    '          if (result.type === "success") onSuccess();',
+    '        onResult: async ({ result, update }) => {  /* [ssd-native] */\n'
+    '          await update();\n'
+    '          if (result.type === "success") onSuccess();', 1)
+open(p, 'w').write(t)
+PYEOF
+  echo -e " ${GREEN}* seedbox-form : taintedMessage off + update() après save${NC}"
+fi
