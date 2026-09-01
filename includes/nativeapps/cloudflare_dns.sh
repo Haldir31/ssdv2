@@ -66,14 +66,19 @@ if [ -z "${CF_ZONE_ID}" ]; then
   [ -n "${CF_ZONE_ID}" ] || { warn "zone ${SSD_DOMAIN} introuvable (le token a-t-il Zone:Read ? sinon poser CF_ZONE_ID)."; exit 1; }
 fi
 
-# --- liste des hostnames à publier (apps natives avec un port + webui) -----
+# --- liste des hostnames à publier -----------------------------------------
+# Par défaut : toutes les apps natives avec un port + webui.
+# SSD_CF_HOSTS="a b c" pour restreindre à ces apps-là.
+FILTER=" ${SSD_CF_HOSTS:-} "
 HOSTS=""
 for f in "${VARS_DIR}"/*.yml; do
   app="$(basename "${f}" .yml)"
   [ "${app}" = "traefik" ] && continue
+  [ "${FILTER}" != "  " ] && case "${FILTER}" in *" ${app} "*) : ;; *) continue ;; esac
   if [ "${app}" = "webui" ]; then HOSTS="${HOSTS} webui"; continue; fi
   grep -qE '^port:[[:space:]]*[0-9]' "${f}" && HOSTS="${HOSTS} ${app}"
 done
+[ -n "${HOSTS// /}" ] || { warn "aucun hostname à publier (SSD_CF_HOSTS='${SSD_CF_HOSTS:-}')"; exit 0; }
 say "Domaine ${SSD_DOMAIN} | tunnel ${SSD_TUNNEL_ID} | hostnames :${HOSTS}"
 [ "${DRY}" = "1" ] && warn "DRY_RUN=1 — aucune écriture"
 
