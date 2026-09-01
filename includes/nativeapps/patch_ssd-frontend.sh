@@ -39,3 +39,13 @@ for f in servers.json server.json; do
 EOF
 done
 echo -e " ${GREEN}* config/servers.json + config/server.json générés (backend: ${BACKEND_URL})${NC}"
+
+# The Applications page's catalog endpoint hard-codes the Linux seedbox-compose
+# path and ignores SERVICES_AVAILABLE_PATH — make it honour the env var.
+CATALOG_EP="${SRC}/src/routes/settings/services.json/+server.ts"
+if [ -f "${CATALOG_EP}" ] && ! grep -q 'SERVICES_AVAILABLE_PATH' "${CATALOG_EP}"; then
+  /usr/bin/sed -i '' \
+    's#const filePath = `/home/\${userName}/seedbox-compose/includes/config/services-available`;#const filePath = process.env.SERVICES_AVAILABLE_PATH || `/home/${userName}/seedbox-compose/includes/config/services-available`;  // [ssd-native]#' \
+    "${CATALOG_EP}"
+  echo -e " ${GREEN}* services.json endpoint : SERVICES_AVAILABLE_PATH honoré${NC}"
+fi
