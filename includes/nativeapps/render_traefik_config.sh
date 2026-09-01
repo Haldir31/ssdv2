@@ -154,3 +154,11 @@ is_bundle_member() { case "${BUNDLE_MEMBERS}" in *" $1 "*) return 0 ;; *) return
   done
 } > "${DYN_DIR}/apps.yml"
 echo " * dynamic config -> ${DYN_DIR}/apps.yml"
+
+# Publication Cloudflare (ingress tunnel + CNAME) — opt-in via SSD_CF_DNS=1.
+# Lancé APRÈS le rendu des routers (les <app>.<domaine> doivent exister avant
+# que le tunnel n'y pointe). Config dans ~/.config/ssd/cloudflare.env.
+if [ "${SSD_CF_DNS:-}" = "1" ] && [ -n "${SSD_DOMAIN}" ]; then
+  SSD_DOMAIN="${SSD_DOMAIN}" "${SCRIPT_DIR}/cloudflare_dns.sh" "${DATA_DIR}" || \
+    echo " ! publication Cloudflare échouée (voir ci-dessus) — routing local OK quand même" >&2
+fi

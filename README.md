@@ -126,16 +126,24 @@ lu depuis `ssd-backend/data/settings.json` → `utilisateur.domain`) puis relanc
 `install_native_app.sh traefik` : chaque router devient
 `Host(\`<app>.<domaine>\`) || Host(\`<app>.local\`)` (l'accès local continue de marcher).
 
-Côté Cloudflare (TLS terminé par le tunnel, Traefik reste en HTTP) :
+**Publication Cloudflare automatique** (`cloudflare_dns.sh`) : copier
+`includes/nativeapps/cloudflare.env.example` → `~/.config/ssd/cloudflare.env` (token
+Account.Tunnel R+W + Zone.DNS Write, account id, tunnel id, domaine) puis :
 
-```
-tunnel  ingress   *.<domaine>  ->  http://localhost:8000     (entrypoint web de Traefik)
-DNS     CNAME     *.<domaine>  ->  <tunnel-id>.cfargotunnel.com
+```sh
+SSD_CF_DNS=1 ./includes/nativeapps/install_native_app.sh traefik   # ou : cloudflare_dns.sh
 ```
 
-Le webui répondant sur tout hôte, `webui.<domaine>` fonctionne tel quel ; pour le restreindre,
-`SSD_WEBUI_HOST=webui.<domaine>` + relancer `install_native_app.sh webui`.
-(`gethomepage` : ajouter l'hôte à `HOMEPAGE_ALLOWED_HOSTS` dans son `vars/`.)
+Pour chaque app native (+ webui) le script, idempotent (`DRY_RUN=1` pour simuler) :
+- ajoute `<app>.<domaine> → http://localhost:8000` à l'**ingress du tunnel**
+  (`GET`/`PUT /accounts/{acc}/cfd_tunnel/{tun}/configurations`, avant la règle `http_status:404`)
+- crée/maj le **CNAME exact** `<app>` → `<tunnel-id>.cfargotunnel.com` (`proxied`) — ajouter un
+  hostname à l'ingress ne crée PAS le DNS, et un enregistrement exact prime sur un wildcard.
+
+TLS terminé par le tunnel, Traefik reste en HTTP. Le token du champ *cloudflare* des réglages
+WebUI (`settings.json`) est utilisé en dernier recours si `CF_API_TOKEN` n'est pas dans l'env.
+
+(`gethomepage` : ajouter l'hôte à `HOMEPAGE_ALLOWED_HOSTS` dans son `vars/` si besoin.)
 
 ### Hors périmètre en mode natif
 
