@@ -395,6 +395,65 @@ def p_seasonarr_sonarr(t):
     return t
 patch("src/integrations/seasonarr/api/routers.py", p_seasonarr_sonarr)
 
+# --- 10. media-management Radarr/Sonarr (fonctions_arrs.py -> data/config.json,
+#         used by symlinks/orphans/repair). Two native fixes:
+#         (a) config.json path + arr ports were relative/hard-coded
+#         (b) auto-fill radarr_api_key / sonarr_api_key from the local config.xml
+def p_arrs_paths(t):
+    if "SSD_DATA_DIR" in t:
+        return t
+    t = t.replace('CONFIG_PATH = Path("data/config.json")',
+                  'CONFIG_PATH = Path(os.environ.get("SSD_DATA_DIR") or "data") / "config.json"  ' + MARK, 1)
+    t = t.replace('RADARR_PORT = 7878', 'RADARR_PORT = int(os.getenv("RADARR_PORT", "7878"))  ' + MARK, 1)
+    t = t.replace('SONARR_PORT = 8989', 'SONARR_PORT = int(os.getenv("SONARR_PORT", "8989"))  ' + MARK, 1)
+    return t
+patch("src/services/fonctions_arrs.py", p_arrs_paths)
+
+def p_configmgr_backfill(t):
+    if "_ssd_backfill_arrs" in t:
+        return t
+    # call it at the end of ConfigManager.__init__ (both branches converge here)
+    t = t.replace(
+        '            logger.info("🆕 Nouveau config.json créé (vide, géré via routes API)")\n'
+        '            self.save()\n',
+        '            logger.info("🆕 Nouveau config.json créé (vide, géré via routes API)")\n'
+        '            self.save()\n'
+        '\n'
+        '        self._ssd_backfill_arrs()  ' + MARK + '\n', 1)
+    # the method itself, before check_environment
+    anchor = '    def check_environment(self, config_dict, prefix="", seperator="_"):\n'
+    method = (
+        '    def _ssd_backfill_arrs(self):  ' + MARK + '\n'
+        '        """Renseigne radarr/sonarr_api_key depuis les config.xml locaux (mode natif)."""\n'
+        '        if not os.getenv("SSD_NATIVE"):\n'
+        '            return\n'
+        '        import xml.etree.ElementTree as _ET\n'
+        '        _changed = False\n'
+        '        for _name, _attr in (("Radarr", "radarr_api_key"), ("Sonarr", "sonarr_api_key")):\n'
+        '            if getattr(self.config, _attr, None):\n'
+        '                continue\n'
+        '            for _p in (f"~/.config/{_name}/config.xml",\n'
+        '                       f"~/Library/Application Support/{_name}/config.xml"):\n'
+        '                _f = os.path.expanduser(_p)\n'
+        '                if not os.path.isfile(_f):\n'
+        '                    continue\n'
+        '                try:\n'
+        '                    _key = (_ET.parse(_f).getroot().findtext("ApiKey") or "").strip()\n'
+        '                except Exception:\n'
+        '                    continue\n'
+        '                if _key:\n'
+        '                    setattr(self.config, _attr, _key)\n'
+        '                    _changed = True\n'
+        '                    logger.info(f"\U0001f511 {_attr} auto-rempli depuis {_f}")\n'
+        '                    break\n'
+        '        if _changed:\n'
+        '            self.save()\n'
+        '\n'
+    )
+    t = t.replace(anchor, method + anchor, 1)
+    return t
+patch("src/program/settings/manager.py", p_configmgr_backfill)
+
 if changed:
     print("   patched: " + ", ".join(changed))
 else:
