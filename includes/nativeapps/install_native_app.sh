@@ -62,6 +62,7 @@ mkdir -p "${APP_DATA_DIR}" "${LOG_DIR}" "${HOME}/Library/LaunchAgents"
 # ---------------------------------------------------------------------------
 kind=""; repo=""; ref="main"; build_cmd=""; start_cmd=""; port=""
 health_path="/"; node_version="22"; formula=""; config_render=""
+python_version="3.12"; post_fetch=""
 
 # strip surrounding double-quotes only if the WHOLE value is quoted
 unquote() {
@@ -79,7 +80,8 @@ while IFS= read -r line || [ -n "${line}" ]; do
   if [ ${in_env} -eq 1 ] && printf '%s' "${line}" | grep -qE '^[[:space:]]{2,}[A-Za-z_][A-Za-z0-9_]*:'; then
     k=$(printf '%s' "${line}" | sed -E 's/^[[:space:]]+([A-Za-z_][A-Za-z0-9_]*):.*/\1/')
     v=$(printf '%s' "${line}" | sed -E 's/^[[:space:]]+[A-Za-z_][A-Za-z0-9_]*:[[:space:]]*//')
-    v="$(unquote "${v}")"; v=$(printf '%s' "${v}" | sed "s#__APP_DATA_DIR__#${APP_DATA_DIR}#g")
+    v="$(unquote "${v}")"
+    v=$(printf '%s' "${v}" | sed "s#__APP_SRC_DIR__#${APP_SRC_DIR}#g;s#__APP_DATA_DIR__#${APP_DATA_DIR}#g")
     ENV_KEYS[${#ENV_KEYS[@]}]="${k}"; ENV_VALS[${#ENV_VALS[@]}]="${v}"
     continue
   fi
@@ -89,7 +91,7 @@ while IFS= read -r line || [ -n "${line}" ]; do
       key=$(printf '%s' "${line}" | sed -E 's/^([A-Za-z_][A-Za-z0-9_]*):.*/\1/')
       val=$(printf '%s' "${line}" | sed -E 's/^[A-Za-z_][A-Za-z0-9_]*:[[:space:]]*//')
       val="$(unquote "${val}")"
-      val=$(printf '%s' "${val}" | sed "s#__APP_DATA_DIR__#${APP_DATA_DIR}#g")
+      val=$(printf '%s' "${val}" | sed "s#__APP_SRC_DIR__#${APP_SRC_DIR}#g;s#__APP_DATA_DIR__#${APP_DATA_DIR}#g")
       case "${key}" in
         kind) kind="${val}" ;;
         repo) repo="${val}" ;;
@@ -101,6 +103,8 @@ while IFS= read -r line || [ -n "${line}" ]; do
         node_version) node_version="${val}" ;;
         formula) formula="${val}" ;;
         config_render) config_render="${val}" ;;
+        python_version) python_version="${val}" ;;
+        post_fetch) post_fetch="${val}" ;;
         data_dir) : ;;  # already handled in the pre-scan above
       esac
       ;;
@@ -119,6 +123,17 @@ fetch_src() {
   else
     git clone --depth 1 --branch "${ref}" "${repo}" "${APP_SRC_DIR}"
   fi
+  # post_fetch: a script under includes/nativeapps/ run right after the source is
+  # (re)fetched and before the build — for apps that need local patches on top of
+  # a pristine upstream checkout (git reset --hard above wipes them every update).
+  if [ -n "${post_fetch}" ]; then
+    if [ -x "${SCRIPT_DIR}/${post_fetch}" ]; then
+      echo -e " ${BLUE}* post_fetch : ${post_fetch}${NC}"
+      "${SCRIPT_DIR}/${post_fetch}" "${APP_SRC_DIR}" "${APP_DATA_DIR}"
+    else
+      echo -e "${YELLOW} * post_fetch introuvable/non exécutable : ${SCRIPT_DIR}/${post_fetch}${NC}" >&2
+    fi
+  fi
 }
 
 case "${kind}" in
@@ -134,6 +149,25 @@ case "${kind}" in
     command -v go >/dev/null 2>&1 || brew install go
     fetch_src
     ( cd "${APP_SRC_DIR}" && PATH="/opt/homebrew/bin:${PATH}" bash -c "${build_cmd}" )
+    WORKDIR="${APP_SRC_DIR}"
+    ;;
+  python)
+    PY_BIN="/opt/homebrew/opt/python@${python_version}/bin"
+    [ -x "${PY_BIN}/python${python_version}" ] || brew install "python@${python_version}"
+    VENV_DIR="${APP_DATA_DIR}/venv"
+    [ -x "${VENV_DIR}/bin/python" ] || "${PY_BIN}/python${python_version}" -m venv "${VENV_DIR}"
+    "${VENV_DIR}/bin/python" -m pip install -q --upgrade pip wheel
+    fetch_src
+    # build_cmd runs with the venv fully "activated" (PATH + VIRTUAL_ENV) so that
+    # poetry/pip target the venv and never the Homebrew Python, CWD at the source
+    # root. PIP_REQUIRE_VIRTUALENV guards against an accidental global install.
+    ( cd "${APP_SRC_DIR}" \
+        && PATH="${VENV_DIR}/bin:${PY_BIN}:${PATH}" \
+           VIRTUAL_ENV="${VENV_DIR}" \
+           PIP_REQUIRE_VIRTUALENV=true \
+           POETRY_VIRTUALENVS_CREATE=false \
+           bash -c "${build_cmd}" )
+    RUN_PATH="${VENV_DIR}/bin:${RUN_PATH}"
     WORKDIR="${APP_SRC_DIR}"
     ;;
   brew)
