@@ -28,6 +28,103 @@ if [ -n "${DATA}" ]; then
   fi
 fi
 
+# --- native service layer: presents the com.ssd.* LaunchAgents to docker.py as
+#     if they were containers (list + start/stop/restart via launchctl). --------
+mkdir -p "${SRC}/src/routers/secure"
+cat > "${SRC}/src/routers/secure/_native_svc.py" <<'NATIVEEOF'
+"""macOS-native service layer for the ssdv2 fork (includes/nativeapps/).
+
+docker.py imports this to list / act on the com.ssd.* LaunchAgents instead of
+Docker containers when running in native mode.  [ssd-native]
+"""
+import glob
+import os
+import subprocess
+
+SSD_NATIVE = (
+    os.getenv("SSD_NATIVE", "").strip().lower() in ("1", "true", "yes")
+    or os.uname().sysname == "Darwin"
+)
+
+_LA_DIR = os.path.expanduser("~/Library/LaunchAgents")
+_PREFIX = "com.ssd."
+_UID = os.getuid()
+
+try:
+    import psutil
+except Exception:  # pragma: no cover
+    psutil = None
+
+_procs = {}  # pid -> psutil.Process (kept so cpu_percent() has a delta reference)
+
+
+def _launchctl_pids():
+    out = {}
+    try:
+        r = subprocess.run(["launchctl", "list"], capture_output=True, text=True, timeout=5)
+        for line in r.stdout.splitlines()[1:]:
+            parts = line.split("\t")
+            if len(parts) >= 3 and parts[2].startswith(_PREFIX):
+                pid = parts[0].strip()
+                out[parts[2].strip()] = int(pid) if pid.lstrip("-").isdigit() and pid != "-" else None
+    except Exception:
+        pass
+    return out
+
+
+def _cpu_mem(pid):
+    if not psutil or not pid:
+        return "N/A", "N/A"
+    try:
+        p = _procs.get(pid)
+        if p is None or not p.is_running():
+            p = psutil.Process(pid)
+            _procs[pid] = p
+            p.cpu_percent(None)
+        return f"{p.cpu_percent(None):.1f}%", f"{p.memory_percent():.1f}%"
+    except Exception:
+        return "N/A", "N/A"
+
+
+def native_services():
+    pids = _launchctl_pids()
+    out = []
+    for plist in sorted(glob.glob(os.path.join(_LA_DIR, _PREFIX + "*.plist"))):
+        label = os.path.basename(plist)[:-6]
+        name = label[len(_PREFIX):]
+        pid = pids.get(label)
+        if pid:
+            cpu, mem = _cpu_mem(pid)
+            status = f"Up (pid {pid})"
+        else:
+            cpu = mem = "-"
+            status = "Exited"
+        out.append({"id": name, "name": name, "status": status, "cpu": cpu, "mem": mem})
+    return out
+
+
+def native_action(name, action):
+    from fastapi import HTTPException
+
+    if not name or action not in ("start", "stop", "restart"):
+        raise HTTPException(status_code=400, detail="Paramètres invalides")
+    label = _PREFIX + name
+    plist = os.path.join(_LA_DIR, label + ".plist")
+    dom = f"gui/{_UID}"
+    try:
+        if action == "restart":
+            cmd = ["launchctl", "kickstart", "-k", f"{dom}/{label}"]
+        elif action == "stop":
+            cmd = ["launchctl", "bootout", f"{dom}/{label}"]
+        else:
+            cmd = ["launchctl", "bootstrap", dom, plist]
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        return {"message": f"{name} {action}ed"}
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(status_code=500, detail=f"launchctl {action}: {(e.stderr or '').strip()}")
+NATIVEEOF
+echo -e " ${GREEN}* _native_svc.py déposé${NC}"
+
 python3 - "${SRC}" <<'PYEOF'
 import io, os, sys, pathlib
 
@@ -135,6 +232,62 @@ def p_domains(t):
         .replace('raise HTTPException(status_code=500, detail="\'dossiers.domaine\' manquant")',
                  'return {}  ' + MARK, 1))
 patch("src/routers/secure/script.py", p_domains)
+
+# --- 6. docker.py: in native mode the com.ssd.* LaunchAgents ARE the services —
+#        route list + start/stop/restart through _native_svc; disk usage of $HOME
+#        (macOS "/" is a tiny read-only volume). ------------------------------
+def p_docker_native_list(t):
+    anchor = ('def list_containers():\n'
+              '    """Liste les conteneurs Docker avec CPU/MEM si dispo"""\n'
+              '    global _last_containers, _last_containers_time\n')
+    if anchor not in t or (anchor + "    from routers.secure._native_svc") in t:
+        return t
+    return t.replace(anchor, anchor +
+        "    from routers.secure._native_svc import SSD_NATIVE, native_services  " + MARK + "\n"
+        "    if SSD_NATIVE:\n"
+        "        return native_services()\n", 1)
+patch("src/routers/secure/docker.py", p_docker_native_list)
+
+def p_docker_native_action(t):
+    anchor = 'def docker_action(data: dict):\n    container_id = data.get("id")\n'
+    if anchor not in t or "native_action" in t:
+        return t
+    return t.replace(anchor,
+        'def docker_action(data: dict):\n'
+        '    from routers.secure._native_svc import SSD_NATIVE, native_action  ' + MARK + '\n'
+        '    if SSD_NATIVE:\n'
+        '        return native_action(data.get("id"), data.get("action"))\n'
+        '    container_id = data.get("id")\n', 1)
+patch("src/routers/secure/docker.py", p_docker_native_action)
+
+def p_docker_disk(t):
+    old = 'disk = psutil.disk_usage("/")'
+    if old not in t:
+        return t
+    return t.replace(old, 'disk = psutil.disk_usage(os.path.expanduser("~"))  ' + MARK, 1)
+patch("src/routers/secure/docker.py", p_docker_disk)
+
+# --- 7. version.py: read the frontends' version.json straight off disk (native
+#        install) instead of `docker exec <container> cat`. --------------------
+def p_version(t):
+    anchor = 'def _read_version_from_container(container_name: str, path: str, label: str) -> str:\n'
+    if anchor not in t or "os.path.isfile(path)" in t:
+        return t
+    return t.replace(anchor, anchor +
+        '    if os.path.isfile(path):  ' + MARK + '  # fichier local (install natif)\n'
+        '        return _read_version_file(Path(path), label)\n', 1)
+patch("src/version.py", p_version)
+
+# --- 8. script.py check-file: the native ssdv2 platform is "installed" by
+#        definition (this fork IS running). --------------------------------
+def p_checkfile(t):
+    anchor = 'async def check_file():\n'
+    if anchor not in t or 'SSD_NATIVE' in t:
+        return t
+    return t.replace(anchor, anchor +
+        '    if os.getenv("SSD_NATIVE"):  ' + MARK + '\n'
+        '        return {"exists": True}\n', 1)
+patch("src/routers/secure/script.py", p_checkfile)
 
 if changed:
     print("   patched: " + ", ".join(changed))

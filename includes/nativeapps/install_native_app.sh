@@ -84,7 +84,7 @@ while IFS= read -r line || [ -n "${line}" ]; do
     k=$(printf '%s' "${line}" | sed -E 's/^[[:space:]]+([A-Za-z_][A-Za-z0-9_]*):.*/\1/')
     v=$(printf '%s' "${line}" | sed -E 's/^[[:space:]]+[A-Za-z_][A-Za-z0-9_]*:[[:space:]]*//')
     v="$(unquote "${v}")"
-    v=$(printf '%s' "${v}" | sed "s#__APP_SRC_DIR__#${APP_SRC_DIR}#g;s#__APP_DATA_DIR__#${APP_DATA_DIR}#g;s#__SETTINGS_SOURCE__#${SETTINGS_SOURCE}#g")
+    v=$(printf '%s' "${v}" | sed "s#__APP_SRC_DIR__#${APP_SRC_DIR}#g;s#__APP_DATA_DIR__#${APP_DATA_DIR}#g;s#__STORAGE_ROOT__#${STORAGE_ROOT}#g;s#__SETTINGS_SOURCE__#${SETTINGS_SOURCE}#g")
     ENV_KEYS[${#ENV_KEYS[@]}]="${k}"; ENV_VALS[${#ENV_VALS[@]}]="${v}"
     continue
   fi
@@ -94,7 +94,7 @@ while IFS= read -r line || [ -n "${line}" ]; do
       key=$(printf '%s' "${line}" | sed -E 's/^([A-Za-z_][A-Za-z0-9_]*):.*/\1/')
       val=$(printf '%s' "${line}" | sed -E 's/^[A-Za-z_][A-Za-z0-9_]*:[[:space:]]*//')
       val="$(unquote "${val}")"
-      val=$(printf '%s' "${val}" | sed "s#__APP_SRC_DIR__#${APP_SRC_DIR}#g;s#__APP_DATA_DIR__#${APP_DATA_DIR}#g;s#__SETTINGS_SOURCE__#${SETTINGS_SOURCE}#g")
+      val=$(printf '%s' "${val}" | sed "s#__APP_SRC_DIR__#${APP_SRC_DIR}#g;s#__APP_DATA_DIR__#${APP_DATA_DIR}#g;s#__STORAGE_ROOT__#${STORAGE_ROOT}#g;s#__SETTINGS_SOURCE__#${SETTINGS_SOURCE}#g")
       case "${key}" in
         kind) kind="${val}" ;;
         repo) repo="${val}" ;;
