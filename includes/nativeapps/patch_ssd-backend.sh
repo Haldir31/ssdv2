@@ -81,6 +81,27 @@ def p_watcher(t):
     return t.replace(anchor, inject, 1)
 patch("src/program/file_watcher.py", p_watcher)
 
+# --- 4. seasonarr auth cookies: COOKIE_SECURE is hard-coded True and the cookies
+#        are SameSite=None -> a browser drops them over plain HTTP, so login/
+#        register "succeed" but no session sticks and onboarding loops. Make it
+#        env-driven (COOKIE_SECURE, default true) and pick a valid SameSite. -----
+def p_cookie_const(t):
+    old = "COOKIE_SECURE = True"
+    if old not in t or MARK in t:
+        return t
+    new = ('COOKIE_SECURE = os.getenv("COOKIE_SECURE", "true").strip().lower() not in ("0", "false", "no")  ' + MARK)
+    return t.replace(old, new, 1)
+patch("src/integrations/seasonarr/core/auth.py", p_cookie_const)
+
+def p_cookie_samesite(t):
+    # COOKIE_SECURE is already imported in this module. Replace the bare string
+    # in every set_cookie/delete_cookie call; leaves any trailing comma intact.
+    new_expr = 'samesite=("none" if COOKIE_SECURE else "lax")'
+    if new_expr in t:
+        return t
+    return t.replace('samesite="none"', new_expr)
+patch("src/integrations/seasonarr/api/routers.py", p_cookie_samesite)
+
 if changed:
     print("   patched: " + ", ".join(changed))
 else:
