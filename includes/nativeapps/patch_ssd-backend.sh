@@ -328,6 +328,16 @@ def p_version(t):
         '        return _read_version_file(Path(path), label)\n', 1)
 patch("src/version.py", p_version)
 
+# --- 8b. symlinks.py /fs: le navigateur de dossiers scanne $HOME/Medias en dur.
+#         Sur macOS la bibliothèque est ailleurs -> SSD_MEDIA_DIR. -----------
+def p_media_dir(t):
+    old = 'root_dir = home_dir / "Medias"'
+    if old not in t:
+        return t
+    return t.replace(old,
+        'root_dir = Path(os.environ["SSD_MEDIA_DIR"]) if os.environ.get("SSD_MEDIA_DIR") else home_dir / "Medias"  ' + MARK, 1)
+patch("src/routers/secure/symlinks.py", p_media_dir)
+
 # --- 8. script.py check-file: the native ssdv2 platform is "installed" by
 #        definition (this fork IS running). --------------------------------
 def p_checkfile(t):
