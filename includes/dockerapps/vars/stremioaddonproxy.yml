@@ -9,6 +9,8 @@ pg_volumes:
 pg_env:
   PORT: '7000'
   DATA_DIR: '/app/data'
+  UPSTREAM_MODE: 'socks'
+  UPSTREAM_URL: 'socks5://warp:1080'
   PUBLIC_URL: "https://{{ sub[pgrole][pgrole] if sub_enabled else pgrole }}.{{ user.domain }}"
   AUTH_USER: "{{ user.name }}"
   AUTH_PASS: "{{ user.pass }}"

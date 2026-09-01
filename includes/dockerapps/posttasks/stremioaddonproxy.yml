@@ -1,4 +1,11 @@
 ---
+- name: Vérifier la présence du conteneur WARP
+  ansible.builtin.command:
+    cmd: "docker inspect -f '{% raw %}{{.State.Status}}{% endraw %} {% raw %}{{if .State.Health}}{% endraw %}{% raw %}{{.State.Health.Status}}{% endraw %}{% raw %}{{end}}{% endraw %}' warp"
+  register: stremioaddonproxy_warp_status
+  changed_when: false
+  failed_when: false
+
 - name: Masquer partiellement le mot de passe à afficher
   ansible.builtin.set_fact:
     stremioaddonproxy_masked_password: >-
@@ -15,3 +22,10 @@
       - "Mot de passe : {{ stremioaddonproxy_masked_password }}"
       - "Le mot de passe est celui de votre compte SSDV2."
       - "=============================================="
+
+- name: Afficher la sortie réseau WARP
+  ansible.builtin.debug:
+    msg:
+      - "WARP détecté ({{ stremioaddonproxy_warp_status.stdout | trim }})."
+      - "Pour utiliser WARP dans l’application : SOCKS5 — socks5://warp:1080"
+  when: stremioaddonproxy_warp_status.rc == 0
