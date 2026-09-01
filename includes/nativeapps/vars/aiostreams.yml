@@ -1,0 +1,27 @@
+# Native (non-Docker) definition for AIOStreams (Stremio addon aggregator).
+# Docker equivalent: includes/dockerapps/vars/aiostreams.yml (ghcr.io/viren070/aiostreams)
+# Upstream: github.com/Viren070/AIOStreams — pnpm monorepo, needs Node >= 24.
+#
+# Port 3002 (3000 is nzbdav here). SECRET_KEY is generated once by gen_secret.sh
+# and read at launch so saved addon configs survive restarts. SQLite DB + any
+# runtime data land under <storage>/native/aiostreams/.
+name: aiostreams
+kind: node
+node_version: "24"
+repo: https://github.com/Viren070/AIOStreams.git
+ref: main
+post_fetch: gen_secret.sh
+build_cmd: corepack enable pnpm && pnpm install --frozen-lockfile && pnpm run build
+start_cmd: SECRET_KEY="$(cat __APP_DATA_DIR__/secret_key)" exec pnpm run start
+port: 3002
+health_path: /
+data_dir: aiostreams
+env:
+  PORT: "3002"
+  NODE_ENV: production
+  BASE_URL: http://127.0.0.1:3002
+  DATABASE_URI: sqlite://__APP_DATA_DIR__/db.sqlite
+  ADDON_NAME: AIOStreams
+  ADDON_ID: aiostreams.viren070.com
+  LOG_LEVEL: http
+  LOG_FORMAT: text

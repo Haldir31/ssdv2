@@ -7,7 +7,7 @@
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>-lc</string>
+        <string>-c</string>
         <string>{{START_CMD}}</string>
     </array>
     <key>WorkingDirectory</key>
