@@ -13,7 +13,7 @@ name: traefik
 kind: brew
 formula: traefik
 start_cmd: traefik --configFile="$TRAEFIK_STATIC_CONFIG"
-port: 8080
+port: 8090
 health_path: /ping
 data_dir: traefik
 config_render: render_traefik_config.sh
