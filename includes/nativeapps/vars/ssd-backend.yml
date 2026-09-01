@@ -33,7 +33,10 @@ env:
   BACKEND_SETTINGS_PATH: __APP_DATA_DIR__/data/settings.json
   FRONTEND_VERSION_PATH: __STORAGE_ROOT__/ssd-frontend/src/version.json
   SAISON_FRONTEND_VERSION_PATH: __STORAGE_ROOT__/saison-frontend/src/version.json
-  SCRIPTS_DIR: __STORAGE_ROOT__/ssd-frontend/src/scripts
+  # native replacements of ssd-frontend/scripts/*.sh (deploy/reinit/remove an app
+  # via launchctl + install_native_app.sh instead of ansible/docker)
+  SCRIPTS_DIR: __SETTINGS_SOURCE__/includes/nativeapps/scripts
+  SETTINGS_SOURCE: __SETTINGS_SOURCE__
   SSD_NATIVE: "1"
   LOG_LEVEL: INFO
   # Traefik web entrypoint is plain HTTP (127.0.0.1:8000) — Secure cookies would
