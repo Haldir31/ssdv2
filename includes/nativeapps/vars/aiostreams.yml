@@ -19,9 +19,14 @@ data_dir: aiostreams
 env:
   PORT: "3002"
   NODE_ENV: production
-  BASE_URL: http://127.0.0.1:3002
+  # Public URL (behind Traefik + Cloudflare tunnel) so the frontend generates
+  # working install/manifest URLs. 127.0.0.1 broke external access (2026-09-01).
+  BASE_URL: https://aiostreams.jmiflix.fr
   DATABASE_URI: sqlite://__APP_DATA_DIR__/db.sqlite
   ADDON_NAME: AIOStreams
   ADDON_ID: aiostreams.viren070.com
   LOG_LEVEL: http
   LOG_FORMAT: text
+  # Login for /dashboard and config saves (config page itself is public —
+  # AIOSTREAMS_AUTH_REQUIRED defaults false). user:pass, comma-separated for more.
+  AIOSTREAMS_AUTH: haldir:***REMOVED-CREDENTIAL***
