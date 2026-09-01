@@ -336,8 +336,18 @@ def p_media_dir(t):
         return t
     # .resolve() : $HOME/Medias peut être un lien symbolique vers la vraie
     # bibliothèque — sinon le contrôle `target.relative_to(root_dir)` casse.
-    return t.replace(old,
+    t = t.replace(old,
         'root_dir = (Path(os.environ["SSD_MEDIA_DIR"]) if os.environ.get("SSD_MEDIA_DIR") else home_dir / "Medias").resolve()  ' + MARK, 1)
+    # suivre les liens pour lister les dossiers du navigateur /fs -> les racines
+    # média peuvent être des alias (ex: Medias/Films -> movies, convention FR).
+    t = t.replace(
+        'if entry.name.startswith(".") and not show_hidden:\n'
+        '                    continue\n'
+        '                if entry.is_dir(follow_symlinks=False):',
+        'if entry.name.startswith(".") and not show_hidden:\n'
+        '                    continue\n'
+        '                if entry.is_dir(follow_symlinks=True):  ' + MARK, 1)
+    return t
 patch("src/routers/secure/symlinks.py", p_media_dir)
 
 # --- 8. script.py check-file: the native ssdv2 platform is "installed" by
