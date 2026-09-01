@@ -32,7 +32,7 @@ INTERACTIVE=0
 # builds (git, go), runtimes des apps natives (node@22, python@3.12),
 # smartmontools (temp NVMe du dashboard). node@/python@ sont aussi posés à la
 # demande par install_native_app.sh — ici on prend de l'avance.
-BREW_FORMULAE="bash gnu-getopt gettext dialog git go node@22 python@3.12 smartmontools"
+BREW_FORMULAE="bash gnu-getopt gettext dialog git go node@22 python@3.12 smartmontools macmon"
 
 # ---------------------------------------------------------------------------
 # 1. Xcode Command Line Tools (compilateurs — go, node-gyp, better-sqlite3…)

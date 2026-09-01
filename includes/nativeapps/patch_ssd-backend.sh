@@ -38,6 +38,7 @@ docker.py imports this to list / act on the com.ssd.* LaunchAgents instead of
 Docker containers when running in native mode.  [ssd-native]
 """
 import glob
+import json
 import os
 import shutil
 import subprocess
@@ -105,10 +106,23 @@ def native_services():
     return out
 
 
+def _macmon():
+    exe = shutil.which("macmon") or "/opt/homebrew/bin/macmon"
+    try:
+        r = subprocess.run([exe, "pipe", "-s", "1", "-i", "200"],
+                           capture_output=True, text=True, timeout=8)
+        return json.loads(r.stdout.strip().splitlines()[-1])
+    except Exception:
+        return {}
+
+
 def native_sensors():
-    """NVMe temp of the internal Apple SSD via smartctl (no sudo on Apple Silicon).
-    CPU temp / fan RPM need SMC/powermetrics (root) -> not reported."""
-    temps = []
+    """Dashboard sensors, all sudoless on Apple Silicon:
+      NVMe temp  <- smartctl -A (internal Apple SSD)
+      CPU temp + fan RPM <- macmon (reads IOReport, no root)
+    Labels/chips are faked to what the frontend's find() matches on."""
+    temps, fans = [], []
+
     smartctl = shutil.which("smartctl") or "/opt/homebrew/bin/smartctl"
     try:
         r = subprocess.run([smartctl, "-A", _SMART_DEV], capture_output=True, text=True, timeout=8)
@@ -120,7 +134,16 @@ def native_sensors():
                 break
     except Exception:
         pass
-    return {"temperatures": temps, "fans": []}
+
+    m = _macmon()
+    ct = (m.get("temp") or {}).get("cpu_temp_avg")
+    if ct:
+        temps.append({"chip": "coretemp", "label": "Package id 0", "temp": round(ct, 1)})
+    for f in (m.get("fans") or []):
+        if f.get("rpm") is not None:
+            fans.append({"chip": "thinkpad", "label": "fan", "rpm": round(f["rpm"])})
+
+    return {"temperatures": temps, "fans": fans}
 
 
 def native_action(name, action):

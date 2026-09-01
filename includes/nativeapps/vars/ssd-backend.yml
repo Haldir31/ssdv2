@@ -14,9 +14,10 @@ kind: python
 python_version: "3.12"
 repo: https://github.com/laster13/ssd-backend.git
 ref: main
-# smartmontools: `smartctl -A /dev/disk0` gives the internal SSD's NVMe temp on
-# Apple Silicon without sudo (dashboard sensor gauge).
-brew_deps: smartmontools
+# dashboard sensor gauges, both sudoless on Apple Silicon:
+#   smartmontools -> NVMe temp (`smartctl -A /dev/disk0`)
+#   macmon        -> CPU temp + fan RPM (reads IOReport, no root)
+brew_deps: smartmontools macmon
 post_fetch: patch_ssd-backend.sh
 build_cmd: pip install -q poetry && poetry install --only main --no-root
 start_cmd: JWT_SECRET_KEY="$(cat __APP_DATA_DIR__/jwt_secret)" exec python -m uvicorn src.main:app --host 127.0.0.1 --port 8091 --log-level info
