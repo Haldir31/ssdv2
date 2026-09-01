@@ -39,6 +39,7 @@ Docker containers when running in native mode.  [ssd-native]
 """
 import glob
 import os
+import shutil
 import subprocess
 
 SSD_NATIVE = (
@@ -49,6 +50,7 @@ SSD_NATIVE = (
 _LA_DIR = os.path.expanduser("~/Library/LaunchAgents")
 _PREFIX = "com.ssd."
 _UID = os.getuid()
+_SMART_DEV = os.getenv("SSD_SMART_DEVICE", "/dev/disk0")
 
 try:
     import psutil
@@ -101,6 +103,24 @@ def native_services():
             status = "Exited"
         out.append({"id": name, "name": name, "status": status, "cpu": cpu, "mem": mem})
     return out
+
+
+def native_sensors():
+    """NVMe temp of the internal Apple SSD via smartctl (no sudo on Apple Silicon).
+    CPU temp / fan RPM need SMC/powermetrics (root) -> not reported."""
+    temps = []
+    smartctl = shutil.which("smartctl") or "/opt/homebrew/bin/smartctl"
+    try:
+        r = subprocess.run([smartctl, "-A", _SMART_DEV], capture_output=True, text=True, timeout=8)
+        for line in r.stdout.splitlines():
+            if line.startswith("Temperature:"):
+                digits = "".join(c for c in line.split(":", 1)[1] if c.isdigit())
+                if digits:
+                    temps.append({"chip": "nvme", "label": "Composite", "temp": int(digits)})
+                break
+    except Exception:
+        pass
+    return {"temperatures": temps, "fans": []}
 
 
 def native_action(name, action):
@@ -220,6 +240,13 @@ def p_docker_sensors(t):
                   'temps = getattr(psutil, "sensors_temperatures", lambda **_: {})(fahrenheit=False)  ' + MARK + "  # psutil macOS", 1)
     t = t.replace('fans = psutil.sensors_fans()',
                   'fans = getattr(psutil, "sensors_fans", lambda: {})()', 1)
+    # native: NVMe temp via smartctl
+    t = t.replace('def get_sensors():\n    try:\n',
+                  'def get_sensors():\n'
+                  '    from routers.secure._native_svc import SSD_NATIVE, native_sensors  ' + MARK + '\n'
+                  '    if SSD_NATIVE:\n'
+                  '        return native_sensors()\n'
+                  '    try:\n', 1)
     return t
 patch("src/routers/secure/docker.py", p_docker_sensors)
 

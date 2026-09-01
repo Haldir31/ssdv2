@@ -65,7 +65,7 @@ mkdir -p "${APP_DATA_DIR}" "${LOG_DIR}" "${HOME}/Library/LaunchAgents"
 # ---------------------------------------------------------------------------
 kind=""; repo=""; ref="main"; build_cmd=""; start_cmd=""; port=""
 health_path="/"; node_version="22"; formula=""; config_render=""
-python_version="3.12"; post_fetch=""; members=""; bundle_render=""
+python_version="3.12"; post_fetch=""; members=""; bundle_render=""; brew_deps=""
 
 # strip surrounding double-quotes only if the WHOLE value is quoted
 unquote() {
@@ -110,6 +110,7 @@ while IFS= read -r line || [ -n "${line}" ]; do
         post_fetch) post_fetch="${val}" ;;
         members) members="${val}" ;;
         bundle_render) bundle_render="${val}" ;;
+        brew_deps) brew_deps="${val}" ;;
         data_dir) : ;;  # already handled in the pre-scan above
       esac
       ;;
@@ -138,6 +139,11 @@ if [ -n "${members}" ]; then
 fi
 
 echo -e "${BLUE}### ${NAME} — installation native macOS (kind=${kind}) ###${NC}"
+
+# brew_deps: extra Homebrew formulae this app needs at runtime (space-separated).
+for _dep in ${brew_deps}; do
+  brew list --versions "${_dep}" >/dev/null 2>&1 || { echo -e " * brew install ${_dep}"; brew install "${_dep}"; }
+done
 
 RUN_PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:/usr/sbin:/sbin"
 WORKDIR="${APP_DATA_DIR}"
