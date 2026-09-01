@@ -17,5 +17,5 @@ data_dir: gethomepage
 env:
   PORT: 3050
   HOSTNAME: 127.0.0.1
-  HOMEPAGE_ALLOWED_HOSTS: localhost:3050,127.0.0.1:3050
+  HOMEPAGE_ALLOWED_HOSTS: localhost:3050,127.0.0.1:3050,gethomepage.local
   NEXT_TELEMETRY_DISABLED: 1
