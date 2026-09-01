@@ -241,6 +241,11 @@ function checking_errors() {
 }
 
 function install_ufw() {
+  if [ "${SSD_OS}" = "Darwin" ]; then
+    echo -e "${YELLOW}"$(gettext "UFW n'est pas disponible sur macOS — non supporté en mode natif.")"${NC}"
+    echo -e "${YELLOW}"$(gettext "Utilisez le pare-feu applicatif macOS ou le pare-feu de votre routeur.")"${NC}"
+    return 0
+  fi
   #clear
   echo -e "${CCYAN}---------------------------------------------------------------${CEND}"
   echo -e "${CCYAN}" $(gettext "UFW sera installé avec les valeurs par défaut uniquement") "${CEND}"
@@ -359,7 +364,9 @@ function install_common() {
   ansible-galaxy collection install community.general
   # dépendence permettant de gérer les fichiers yml
   ansible-galaxy install kwoodson.yedit
-  ansible-galaxy role install geerlingguy.docker
+  if [ "${SSD_OS}" != "Darwin" ]; then
+    ansible-galaxy role install geerlingguy.docker
+  fi
 
   manage_account_yml settings.storage "${SETTINGS_STORAGE}"
   manage_account_yml settings.source "${SETTINGS_SOURCE}"
@@ -375,6 +382,12 @@ function install_common() {
   # On part à la pêche aux infos....
   ${SETTINGS_SOURCE}/includes/config/scripts/get_infos.sh
   echo ""
+  if [ "${SSD_OS}" = "Darwin" ]; then
+    echo -e "${CCYAN}"$(gettext "Mode natif macOS actif — voir includes/nativeapps/ et README.md.")"${CEND}"
+    echo -e "${CCYAN}"$(gettext "Docker, Traefik-conteneur, crowdsec et logrotate (Linux) sont ignorés.")"${CEND}"
+    "${SETTINGS_SOURCE}/includes/nativeapps/install_native_app.sh" traefik
+    return 0
+  fi
   # Installation de docker
   install_docker
   # install de traefik
@@ -389,6 +402,10 @@ function install_common() {
 }
 
 function install_docker() {
+  if [ "${SSD_OS}" = "Darwin" ]; then
+    echo -e "${YELLOW}"$(gettext "Mode natif macOS : Docker n'est pas requis, installation ignorée.")"${NC}"
+    return 0
+  fi
   echo -e "${BLUE}### DOCKER ###${NC}"
   echo -e " ${BWHITE}"* $(gettext "Installation") Docker"${NC}"
   file="/usr/bin/docker"
@@ -546,6 +563,23 @@ function install_services() {
 
 launch_service () {
     line=$1
+
+    # macOS native mode: if a native definition exists for this app, install
+    # it that way instead of going through the Docker/Ansible flow below.
+    # Apps without a nativeapps/vars/<line>.yml stay Docker-only and clearly
+    # say so — see includes/nativeapps/ and README.md "macOS native mode".
+    if [ "${SSD_OS}" = "Darwin" ]; then
+        native_vars="${SETTINGS_SOURCE}/includes/nativeapps/vars/${line}.yml"
+        if [ -f "${native_vars}" ]; then
+            "${SETTINGS_SOURCE}/includes/nativeapps/install_native_app.sh" "${line}"
+            return $?
+        else
+            echo -e "${YELLOW}"$(gettext "non supporté en mode natif macOS (nécessite Docker) :")" ${line}${NC}"
+            echo -e "${YELLOW}"$(gettext "Ajoutez includes/nativeapps/vars/${line}.yml pour l'ajouter au catalogue natif.")"${NC}"
+            return 1
+        fi
+    fi
+
     log_write "Installation de ${line}" > /dev/null 2>&1
     error=0
     rc=0
@@ -1046,6 +1080,11 @@ function log_write() {
 }
 
 function check_docker_group() {
+  # No `docker` Unix group / getent / groupadd on macOS, and native mode
+  # doesn't require the user to be in a docker group anyway.
+  if [ "${SSD_OS}" = "Darwin" ]; then
+    return 0
+  fi
   error=0
   if getent group docker >/dev/null 2>&1; then
     if getent group docker | grep ${USER} >/dev/null 2>&1; then
@@ -1459,7 +1498,17 @@ function install_gluetun {
 }
 
 function get_architecture() {
-  architecture=$(dpkg --print-architecture)
+  if [ "${SSD_OS}" = "Darwin" ]; then
+    # dpkg doesn't exist on macOS; translate uname -m to Debian-style arch
+    # naming since some parts of the codebase compare against it.
+    case "$(uname -m)" in
+      arm64) architecture="arm64" ;;
+      x86_64) architecture="amd64" ;;
+      *) architecture="$(uname -m)" ;;
+    esac
+  else
+    architecture=$(dpkg --print-architecture)
+  fi
   manage_account_yml system.arch "${architecture}"
 }
 

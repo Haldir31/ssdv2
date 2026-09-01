@@ -1,5 +1,21 @@
 ## PARAMETERS
 
+## --- macOS native-mode support (SSD fork) ---
+## SSD_OS: "Darwin" or "Linux". NATIVE_MODE: 1 when running natively on macOS
+## (no Docker requirement), 0 on Linux where the original Docker/Ansible flow
+## is untouched. See includes/nativeapps/ and README.md "macOS native mode".
+get_os_type() {
+  uname -s
+}
+export SSD_OS
+SSD_OS="$(get_os_type)"
+export NATIVE_MODE
+if [ "${SSD_OS}" = "Darwin" ]; then
+  NATIVE_MODE=1
+else
+  NATIVE_MODE=0
+fi
+
 CSI="\033["
 CEND="${CSI}0m"
 CRED="${CSI}1;31m"
@@ -14,7 +30,12 @@ YELLOW='\e[0;33m'
 BWHITE='\e[1;37m'
 NC='\033[0m'
 DATE=$(date +%d/%m/%Y-%H:%M:%S)
-IPADDRESS=$(hostname -I | cut -d\  -f1)
+# `hostname -I` is GNU/Linux-only; macOS has no equivalent flag.
+if [ "${SSD_OS}" = "Darwin" ]; then
+  IPADDRESS=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo "127.0.0.1")
+else
+  IPADDRESS=$(hostname -I | cut -d\  -f1)
+fi
 CURRENTDIR="$PWD"
 export NEWT_COLORS='
   window=,white
@@ -49,8 +70,13 @@ if [ ! -f "${HOME}/.config/ssd/env" ]; then
           exit 1
           ;;
   esac
-  sudo localectl set-locale LANG=$nouvelle_locale
-  source /etc/default/locale
+  # `localectl`/`/etc/default/locale` are Linux (systemd/Debian) only.
+  if [ "${SSD_OS}" = "Darwin" ]; then
+    export LANG="${nouvelle_locale}"
+  else
+    sudo localectl set-locale LANG=$nouvelle_locale
+    source /etc/default/locale
+  fi
 
   # pas de fichier d'environnement
   if [ -f "/opt/seedbox-compose/ssddb" ]; then
