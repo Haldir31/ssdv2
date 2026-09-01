@@ -385,6 +385,8 @@ function install_common() {
   if [ "${SSD_OS}" = "Darwin" ]; then
     echo -e "${CCYAN}"$(gettext "Mode natif macOS actif — voir includes/nativeapps/ et README.md.")"${CEND}"
     echo -e "${CCYAN}"$(gettext "Docker, Traefik-conteneur, crowdsec et logrotate (Linux) sont ignorés.")"${CEND}"
+    # Prérequis natifs (Homebrew + formules, macFUSE, /etc/hosts). Idempotent.
+    "${SETTINGS_SOURCE}/includes/nativeapps/bootstrap.sh" || true
     "${SETTINGS_SOURCE}/includes/nativeapps/install_native_app.sh" traefik
     return 0
   fi

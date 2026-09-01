@@ -25,11 +25,20 @@ d'origine (Docker + Ansible) est inchangé.
 
 ### Prérequis macOS
 
+`includes/nativeapps/bootstrap.sh` installe tout (Xcode CLT, Homebrew, formules
+`bash gnu-getopt gettext dialog git go node@22 python@3.12 smartmontools`, et — avec
+confirmation — le cask macFUSE et l'entrée `/etc/hosts` `ssd.local`). Idempotent, lancé
+automatiquement par `install_common()` au premier `seedbox.sh` ; ou à la main :
+
 ```sh
-brew install bash gnu-getopt gettext dialog git go
-# lancer seedbox.sh avec le bash de Homebrew (le /bin/bash système est en 3.2) :
+./includes/nativeapps/bootstrap.sh
+# puis, le /bin/bash système étant en 3.2 :
 /opt/homebrew/bin/bash ./seedbox.sh
 ```
+
+Les étapes `sudo` (cask macFUSE, `/etc/hosts`) sont toujours demandées — jamais silencieuses —
+et sautées avec un rappel si le terminal n'est pas interactif ou si `SSD_SKIP_SUDO=1`.
+`gnu-getopt` est keg-only : ajoutez `/opt/homebrew/opt/gnu-getopt/bin` au PATH avant `seedbox.sh`.
 
 `get_os_type` (dans `includes/variables.sh`) détecte `Darwin` et pose `SSD_OS=Darwin` +
 `NATIVE_MODE=1`. Docker, UFW, logrotate et le rôle Ansible `geerlingguy.docker` sont alors
