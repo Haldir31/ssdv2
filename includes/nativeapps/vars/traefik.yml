@@ -1,0 +1,21 @@
+# Native (non-Docker) definition for Traefik (reverse proxy / TLS)
+# Docker equivalent: includes/dockerapps/vars/traefik.yml + Ansible role.
+# Traefik is a single static Go binary -> installed via Homebrew, no container.
+#
+# config_render runs render_traefik_config.sh which produces:
+#   <storage>/native/traefik/traefik.yml   (static config)
+#   <storage>/native/traefik/dynamic/*.yml (dynamic config, per-app routers)
+# from the templates already in includes/dockerapps/templates/traefik/*.j2
+#
+# Ports 80/443 need root -> this LaunchAgent is loaded as a LaunchDaemon
+# by install_native_app.sh when name == traefik (see that script).
+name: traefik
+kind: brew
+formula: traefik
+start_cmd: traefik --configFile="$TRAEFIK_STATIC_CONFIG"
+port: 8080
+health_path: /ping
+data_dir: traefik
+config_render: render_traefik_config.sh
+env:
+  TRAEFIK_STATIC_CONFIG: __APP_DATA_DIR__/traefik.yml
