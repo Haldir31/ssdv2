@@ -1,0 +1,14 @@
+---
+pgrole: 'stremioaddonproxy'
+intport: '7000'
+image: 'ghcr.io/guiro28/stremio-addon-proxy:sha-32f0168'
+
+pg_volumes:
+  - "{{ settings.storage }}/docker/{{ lookup('env','USER') }}/{{ pgrole }}:/app/data:rw"
+
+pg_env:
+  PORT: '7000'
+  DATA_DIR: '/app/data'
+  PUBLIC_URL: "https://{{ sub[pgrole][pgrole] if sub_enabled else pgrole }}.{{ user.domain }}"
+  AUTH_USER: "{{ user.name }}"
+  AUTH_PASS: "{{ user.pass }}"

@@ -1,0 +1,17 @@
+---
+- name: Masquer partiellement le mot de passe à afficher
+  ansible.builtin.set_fact:
+    stremioaddonproxy_masked_password: >-
+      {{ user.pass[:2] ~ '******' ~ user.pass[-2:] if user.pass | length > 4 else '********' }}
+
+- name: Afficher les informations de connexion Stremio Addon Proxy
+  ansible.builtin.debug:
+    msg:
+      - "=============================================="
+      - "STREMIO ADDON PROXY - INSTALLATION TERMINEE"
+      - "=============================================="
+      - "Interface : https://{{ sub[pgrole][pgrole] if sub_enabled else pgrole }}.{{ user.domain }}"
+      - "Identifiant : {{ user.name }}"
+      - "Mot de passe : {{ stremioaddonproxy_masked_password }}"
+      - "Le mot de passe est celui de votre compte SSDV2."
+      - "=============================================="

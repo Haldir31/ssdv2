@@ -10,3 +10,5 @@ pg_env:
   TZ: 'Europe/Paris'
   DATABASE_URL: "postgresql+asyncpg://{{ pgrole }}:{{ pgrole }}@db-{{ pgrole }}:5432/{{ pgrole }}"
   SECRET_KEY: "{{ scrob_secret_key }}"
+  ENABLE_REGISTRATIONS: "true"
+  REGISTRATION_MAX_ALLOWED_USERS: "0"
