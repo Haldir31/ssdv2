@@ -102,6 +102,40 @@ def p_cookie_samesite(t):
     return t.replace('samesite="none"', new_expr)
 patch("src/integrations/seasonarr/api/routers.py", p_cookie_samesite)
 
+# --- 5. dashboard endpoints degrade to empty instead of HTTP 500 in native mode
+#        (no Docker daemon, no lm-sensors, no domains configured) — otherwise the
+#        frontend's loadContainers() throws on the first fetch and never reaches
+#        the /docker/stats call, so every perf gauge stays at 0. ----------------
+def p_docker_containers(t):
+    old = ('    except subprocess.CalledProcessError as e:\n'
+           '        raise HTTPException(status_code=500, detail=f"Erreur docker: {e.stderr.strip()}")')
+    if old not in t:
+        return t
+    new = ('    except (subprocess.CalledProcessError, FileNotFoundError):  ' + MARK + '  # pas de Docker -> liste vide\n'
+           '        return []')
+    return t.replace(old, new, 1)
+patch("src/routers/secure/docker.py", p_docker_containers)
+
+def p_docker_sensors(t):
+    if MARK + "  # psutil macOS" in t:
+        return t
+    t = t.replace('temps = psutil.sensors_temperatures(fahrenheit=False)',
+                  'temps = getattr(psutil, "sensors_temperatures", lambda **_: {})(fahrenheit=False)  ' + MARK + "  # psutil macOS", 1)
+    t = t.replace('fans = psutil.sensors_fans()',
+                  'fans = getattr(psutil, "sensors_fans", lambda: {})()', 1)
+    return t
+patch("src/routers/secure/docker.py", p_docker_sensors)
+
+def p_domains(t):
+    if 'return {}  ' + MARK in t:
+        return t
+    return (t
+        .replace('raise HTTPException(status_code=500, detail="\'utilisateur.domain\' manquant")',
+                 'return {}  ' + MARK + '  # pas de domaines en mode natif', 1)
+        .replace('raise HTTPException(status_code=500, detail="\'dossiers.domaine\' manquant")',
+                 'return {}  ' + MARK, 1))
+patch("src/routers/secure/script.py", p_domains)
+
 if changed:
     print("   patched: " + ", ".join(changed))
 else:

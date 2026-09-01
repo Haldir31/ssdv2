@@ -26,6 +26,7 @@ env:
   SSD_DATA_DIR: __APP_DATA_DIR__/data
   DATABASE_URL: sqlite:///__APP_DATA_DIR__/data/seasonarr.db
   BACKEND_VERSION_PATH: __APP_SRC_DIR__/version.json
+  BACKEND_SETTINGS_PATH: __APP_DATA_DIR__/data/settings.json
   LOG_LEVEL: INFO
   # Traefik web entrypoint is plain HTTP (127.0.0.1:8000) — Secure cookies would
   # be dropped by the browser and the seasonarr login/onboarding would loop.
