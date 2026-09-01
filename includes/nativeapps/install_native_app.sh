@@ -24,6 +24,9 @@ set -euo pipefail
 
 NAME="${1:?usage: install_native_app.sh <name>}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# repo root (== SETTINGS_SOURCE when driven from seedbox.sh) — exposed to vars
+# files as the __SETTINGS_SOURCE__ token.
+SETTINGS_SOURCE="${SETTINGS_SOURCE:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 VARS_FILE="${SCRIPT_DIR}/vars/${NAME}.yml"
 TEMPLATE="${SCRIPT_DIR}/templates/launchagent.plist.tpl"
 
@@ -62,7 +65,7 @@ mkdir -p "${APP_DATA_DIR}" "${LOG_DIR}" "${HOME}/Library/LaunchAgents"
 # ---------------------------------------------------------------------------
 kind=""; repo=""; ref="main"; build_cmd=""; start_cmd=""; port=""
 health_path="/"; node_version="22"; formula=""; config_render=""
-python_version="3.12"; post_fetch=""
+python_version="3.12"; post_fetch=""; members=""; bundle_render=""
 
 # strip surrounding double-quotes only if the WHOLE value is quoted
 unquote() {
@@ -81,7 +84,7 @@ while IFS= read -r line || [ -n "${line}" ]; do
     k=$(printf '%s' "${line}" | sed -E 's/^[[:space:]]+([A-Za-z_][A-Za-z0-9_]*):.*/\1/')
     v=$(printf '%s' "${line}" | sed -E 's/^[[:space:]]+[A-Za-z_][A-Za-z0-9_]*:[[:space:]]*//')
     v="$(unquote "${v}")"
-    v=$(printf '%s' "${v}" | sed "s#__APP_SRC_DIR__#${APP_SRC_DIR}#g;s#__APP_DATA_DIR__#${APP_DATA_DIR}#g")
+    v=$(printf '%s' "${v}" | sed "s#__APP_SRC_DIR__#${APP_SRC_DIR}#g;s#__APP_DATA_DIR__#${APP_DATA_DIR}#g;s#__SETTINGS_SOURCE__#${SETTINGS_SOURCE}#g")
     ENV_KEYS[${#ENV_KEYS[@]}]="${k}"; ENV_VALS[${#ENV_VALS[@]}]="${v}"
     continue
   fi
@@ -91,7 +94,7 @@ while IFS= read -r line || [ -n "${line}" ]; do
       key=$(printf '%s' "${line}" | sed -E 's/^([A-Za-z_][A-Za-z0-9_]*):.*/\1/')
       val=$(printf '%s' "${line}" | sed -E 's/^[A-Za-z_][A-Za-z0-9_]*:[[:space:]]*//')
       val="$(unquote "${val}")"
-      val=$(printf '%s' "${val}" | sed "s#__APP_SRC_DIR__#${APP_SRC_DIR}#g;s#__APP_DATA_DIR__#${APP_DATA_DIR}#g")
+      val=$(printf '%s' "${val}" | sed "s#__APP_SRC_DIR__#${APP_SRC_DIR}#g;s#__APP_DATA_DIR__#${APP_DATA_DIR}#g;s#__SETTINGS_SOURCE__#${SETTINGS_SOURCE}#g")
       case "${key}" in
         kind) kind="${val}" ;;
         repo) repo="${val}" ;;
@@ -105,11 +108,34 @@ while IFS= read -r line || [ -n "${line}" ]; do
         config_render) config_render="${val}" ;;
         python_version) python_version="${val}" ;;
         post_fetch) post_fetch="${val}" ;;
+        members) members="${val}" ;;
+        bundle_render) bundle_render="${val}" ;;
         data_dir) : ;;  # already handled in the pre-scan above
       esac
       ;;
   esac
 done < "${VARS_FILE}"
+
+# --- bundle: a meta-app that just installs several native apps in order, then
+#     renders one shared reverse-proxy config (e.g. webui = backend + 2 frontends
+#     behind a single host with path prefixes). No kind/build/LaunchAgent of its
+#     own. Members are installed left-to-right, so list dependencies first.
+if [ -n "${members}" ]; then
+  echo -e "${BLUE}### ${NAME} — bundle natif (${members}) ###${NC}"
+  for _m in ${members}; do
+    "${SCRIPT_DIR}/install_native_app.sh" "${_m}"
+  done
+  if [ -n "${bundle_render}" ]; then
+    if [ -x "${SCRIPT_DIR}/${bundle_render}" ]; then
+      echo -e " ${BLUE}* bundle_render : ${bundle_render}${NC}"
+      "${SCRIPT_DIR}/${bundle_render}" "${APP_DATA_DIR}"
+    else
+      echo -e "${YELLOW} * bundle_render introuvable/non exécutable : ${SCRIPT_DIR}/${bundle_render}${NC}" >&2
+    fi
+  fi
+  echo -e " ${GREEN}--> bundle ${NAME} installé (${members})${NC}"
+  exit 0
+fi
 
 echo -e "${BLUE}### ${NAME} — installation native macOS (kind=${kind}) ###${NC}"
 
