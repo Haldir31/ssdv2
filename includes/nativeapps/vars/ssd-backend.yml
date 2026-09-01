@@ -48,8 +48,8 @@ env:
   RADARR_PORT: "7878"
   SONARR_PORT: "8989"
   # racine de la bibliothèque média (navigateur de dossiers de /settings/symlinks).
-  # Défaut du fork : $HOME/Medias. Ici les root folders Sonarr/Radarr sont sous ~/media.
-  SSD_MEDIA_DIR: __HOME__/media
+  # Défaut du fork : $HOME/Medias. SSD_MEDIA_DIR pour pointer ailleurs.
+  #SSD_MEDIA_DIR: __HOME__/Medias
   LOG_LEVEL: INFO
   # Traefik web entrypoint is plain HTTP (127.0.0.1:8000) — Secure cookies would
   # be dropped by the browser and the seasonarr login/onboarding would loop.
