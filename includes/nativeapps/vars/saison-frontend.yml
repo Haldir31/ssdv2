@@ -1,0 +1,28 @@
+# Native (non-Docker) definition for saison-frontend — the "/season" sub-UI of
+# the ssdv2 WebUI (SvelteKit, adapter-node, better-sqlite3 + drizzle). Docker
+# equivalent: the `saison-frontend` container in dockerapps/pretasks/webui.yml.
+# Upstream: github.com/laster13/saison-frontend. Part of the `webui` bundle.
+#
+# better-sqlite3 opens DATABASE_URL as a raw file path and creates the file, but
+# NOT the schema — so the build runs `drizzle-kit push` (no migration files in
+# the repo) against the final DB location before packaging.
+name: saison-frontend
+kind: node
+node_version: "22"
+repo: https://github.com/laster13/saison-frontend.git
+ref: main
+build_cmd: npm ci && DATABASE_URL="__APP_DATA_DIR__/local.db" npm run db:push -- --force && npm run build
+start_cmd: node build
+port: 8001
+# base path is "/season" in production (svelte.config.js) — there is no route at
+# "/", the app lands on /season/dashboard.
+health_path: /season/dashboard
+data_dir: saison-frontend
+env:
+  HOST: 127.0.0.1
+  PORT: "8001"
+  NODE_ENV: production
+  DATABASE_URL: __APP_DATA_DIR__/local.db
+  # no ORIGIN — see ssd-frontend.yml
+  PROTOCOL_HEADER: x-forwarded-proto
+  HOST_HEADER: x-forwarded-host

@@ -1,0 +1,15 @@
+# Native (non-Docker) definition for `webui` — the ssdv2 management UI
+# ("Interface gestion ssdv2"). Docker equivalent: dockerapps/pretasks/webui.yml
+# (3 containers). Here it is a BUNDLE: no kind/LaunchAgent of its own, just
+# installs its member native apps in order then renders a shared Traefik config.
+#
+# Members (installed left-to-right — backend first, the frontends depend on it):
+#   ssd-backend      FastAPI API           :8091   -> /api/v1
+#   ssd-frontend     SvelteKit UI          :3000   -> /
+#   saison-frontend  SvelteKit "/season"   :8001   -> /season
+#
+# render_webui_traefik.sh puts all three behind a single host (ssd.local) with
+# path-prefix routing.
+name: webui
+members: ssd-backend ssd-frontend saison-frontend
+bundle_render: render_webui_traefik.sh

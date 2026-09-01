@@ -1,0 +1,31 @@
+# Native (non-Docker) definition for ssd-frontend — the ssdv2 WebUI (SvelteKit,
+# @sveltejs/adapter-node). Docker equivalent: the `ssd-frontend` container in
+# dockerapps/pretasks/webui.yml. Upstream: github.com/laster13/ssd-frontend
+# (a fork of the Riven frontend). Part of the `webui` bundle (vars/webui.yml).
+#
+# Talks to ssd-backend server-side via BACKEND_URL; browser calls hit /api/v1 on
+# the same host and Traefik routes them to the backend (see render_webui_traefik.sh).
+name: ssd-frontend
+kind: node
+node_version: "22"
+repo: https://github.com/laster13/ssd-frontend.git
+ref: main
+post_fetch: patch_ssd-frontend.sh
+# upstream pnpm-lock.yaml is out of sync with package.json ("overrides"
+# mismatch) -> can't use --frozen-lockfile.
+build_cmd: corepack enable pnpm && pnpm install --no-frozen-lockfile && pnpm build
+start_cmd: node build
+port: 3001
+health_path: /
+data_dir: ssd-frontend
+env:
+  HOST: 127.0.0.1
+  PORT: "3001"
+  NODE_ENV: production
+  BACKEND_URL: http://127.0.0.1:8091
+  # No ORIGIN: routing is path-only (any host/IP) — adapter-node derives the
+  # origin from the proxy's forwarded headers instead, so CSRF checks on form
+  # POSTs pass whatever host the browser used.
+  PROTOCOL_HEADER: x-forwarded-proto
+  HOST_HEADER: x-forwarded-host
+  SERVICES_AVAILABLE_PATH: __SETTINGS_SOURCE__/includes/config/services-available
