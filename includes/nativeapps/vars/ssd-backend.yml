@@ -1,0 +1,29 @@
+# Native (non-Docker) definition for ssd-backend — the API of the ssdv2 WebUI.
+# Docker equivalent: the `ssd-backend` container in dockerapps/pretasks/webui.yml
+# Upstream: github.com/laster13/ssd-backend  (a trimmed Riven fork, FastAPI +
+# uvicorn, Poetry). Part of the `webui` bundle (vars/webui.yml).
+#
+# Native adjustments live in patch_ssd-backend.sh (post_fetch) — guarded, no-op
+# on re-run, and re-applied automatically after every `git reset --hard` update.
+# Settings/config are the app's own native JSON files under <data>/data/
+# (settings.json, config.json, seasonarr.db) — no ansible inventory needed.
+#
+# Port 8091: 8080 is taken by the native Traefik dashboard.
+name: ssd-backend
+kind: python
+python_version: "3.12"
+repo: https://github.com/laster13/ssd-backend.git
+ref: main
+post_fetch: patch_ssd-backend.sh
+build_cmd: pip install -q poetry && poetry install --only main --no-root
+start_cmd: JWT_SECRET_KEY="$(cat __APP_DATA_DIR__/jwt_secret)" exec python -m uvicorn src.main:app --host 127.0.0.1 --port 8091 --log-level info
+port: 8091
+health_path: /openapi.json
+data_dir: ssd-backend
+env:
+  PYTHONPATH: __APP_SRC_DIR__/src
+  PYTHONUNBUFFERED: "1"
+  SSD_DATA_DIR: __APP_DATA_DIR__/data
+  DATABASE_URL: sqlite:///__APP_DATA_DIR__/data/seasonarr.db
+  BACKEND_VERSION_PATH: __APP_SRC_DIR__/version.json
+  LOG_LEVEL: INFO
