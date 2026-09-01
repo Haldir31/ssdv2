@@ -116,6 +116,27 @@ Les ~180 autres applications restent **Docker uniquement** pour l'instant et l'i
 clairement. En ajouter au catalogue natif = un fichier `nativeapps/vars/<app>.yml` de plus,
 en connaissant la façon de builder/lancer l'appli hors conteneur.
 
+### Nom de domaine
+
+Par défaut chaque app est routée sur `<app>.local` (à ajouter dans `/etc/hosts`) et le webui
+est un catch-all par préfixe de chemin sur l'entrypoint `web` (répond sur n'importe quel hôte).
+
+Pour un vrai domaine, poser **`SSD_DOMAIN`** (ou le champ *domaine* dans les réglages du WebUI,
+lu depuis `ssd-backend/data/settings.json` → `utilisateur.domain`) puis relancer
+`install_native_app.sh traefik` : chaque router devient
+`Host(\`<app>.<domaine>\`) || Host(\`<app>.local\`)` (l'accès local continue de marcher).
+
+Côté Cloudflare (TLS terminé par le tunnel, Traefik reste en HTTP) :
+
+```
+tunnel  ingress   *.<domaine>  ->  http://localhost:8000     (entrypoint web de Traefik)
+DNS     CNAME     *.<domaine>  ->  <tunnel-id>.cfargotunnel.com
+```
+
+Le webui répondant sur tout hôte, `webui.<domaine>` fonctionne tel quel ; pour le restreindre,
+`SSD_WEBUI_HOST=webui.<domaine>` + relancer `install_native_app.sh webui`.
+(`gethomepage` : ajouter l'hôte à `HOMEPAGE_ALLOWED_HOSTS` dans son `vars/`.)
+
 ### Hors périmètre en mode natif
 
 Authelia, OAuth2 Proxy, crowdsec, UFW, logrotate — piliers Linux non portés. Le tunnel

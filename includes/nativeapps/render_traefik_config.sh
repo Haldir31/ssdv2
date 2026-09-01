@@ -25,6 +25,25 @@ DYN_DIR="${DATA_DIR}/dynamic"
 LOG_DIR="${HOME}/Library/Logs/ssd-native/traefik"
 mkdir -p "${DYN_DIR}" "${LOG_DIR}"
 
+# Base domain for the per-app routers: SSD_DOMAIN env, else utilisateur.domain
+# from ssd-backend's settings.json (set via the WebUI), else empty. When set,
+# each app answers on BOTH <app>.<domain> and <app>.local (so local access via
+# /etc/hosts keeps working alongside the Cloudflare tunnel).
+SSD_DOMAIN="${SSD_DOMAIN:-}"
+if [ -z "${SSD_DOMAIN}" ]; then
+  _bset="$(cd "${DATA_DIR}/.." 2>/dev/null && pwd)/ssd-backend/data/settings.json"
+  [ -f "${_bset}" ] && SSD_DOMAIN="$(/usr/bin/python3 -c 'import json,sys;print((json.load(open(sys.argv[1])).get("utilisateur") or {}).get("domain","") or "")' "${_bset}" 2>/dev/null || true)"
+fi
+[ -n "${SSD_DOMAIN}" ] && echo " * domaine : ${SSD_DOMAIN} (routers <app>.${SSD_DOMAIN} + <app>.local)"
+
+app_rule() {  # $1 = app name -> Traefik host rule
+  if [ -n "${SSD_DOMAIN}" ]; then
+    printf 'Host(`%s.%s`) || Host(`%s.local`)' "$1" "${SSD_DOMAIN}" "$1"
+  else
+    printf 'Host(`%s.local`)' "$1"
+  fi
+}
+
 HTTP_PORT="${SSD_TRAEFIK_HTTP_PORT:-8000}"
 HTTPS_PORT="${SSD_TRAEFIK_HTTPS_PORT:-8443}"
 # 8090, not 8080: ssd-backend (webui) serves its API on 8080 in its upstream
@@ -117,7 +136,7 @@ is_bundle_member() { case "${BUNDLE_MEMBERS}" in *" $1 "*) return 0 ;; *) return
     p="$(sed -n 's/^port:[[:space:]]*//p' "${f}" | head -1)"
     [ -z "${p}" ] && continue
     printf "    %s:\n" "${app}"
-    printf "      rule: 'Host(\`%s.local\`)'\n" "${app}"
+    printf "      rule: \"%s\"\n" "$(app_rule "${app}")"
     printf "      entryPoints: ['web']\n"
     printf "      service: '%s'\n" "${app}"
   done
