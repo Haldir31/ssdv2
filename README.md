@@ -79,7 +79,29 @@ Puis : `./includes/nativeapps/install_native_app.sh monapp`.
 |----------------|------|-------|-------|
 | **gethomepage** (dashboard) | node | 3050  | Next.js standalone ; config sous `<storage>/native/gethomepage/src/.next/standalone/config/` ; ajouter votre domaine à `HOMEPAGE_ALLOWED_HOSTS` |
 | **decypharr** (symlinks/AllDebrid) | go | 8282 | build CGO ; nécessite **macFUSE** ; éditer `<storage>/native/decypharr/config.json` (token debrid) puis `launchctl kickstart -k gui/$(id -u)/com.ssd.decypharr` |
-| **traefik** (reverse proxy) | brew | 8000 / 8443 / 8080 | dashboard+API sur :8080 ; config générée depuis `render_traefik_config.sh` ; entrypoints en `127.0.0.1:80xx` (LaunchAgent sans root) — pour `:80/:443`, éditer `traefik.yml` et charger en LaunchDaemon |
+| **traefik** (reverse proxy) | brew | 8000 / 8443 / 8090 | dashboard+API sur :8090 ; config générée depuis `render_traefik_config.sh` ; entrypoints en `127.0.0.1:80xx` (LaunchAgent sans root) — pour `:80/:443`, éditer `traefik.yml` et charger en LaunchDaemon |
+| **webui** (Interface gestion ssdv2) | *bundle* | 3001 / 8001 / 8091 | `members:` = `ssd-backend` (FastAPI, `kind: python`, :8091) + `ssd-frontend` (SvelteKit, :3001) + `saison-frontend` (SvelteKit `/season`, :8001). `render_webui_traefik.sh` place les 3 derrière **un seul hôte** (`ssd.local`, override `SSD_WEBUI_HOST`) avec routage par préfixe : `/api/v1`→backend, `/season`→saison, `/`→frontend. Ajouter `ssd.local` à `/etc/hosts`. La couche gestion Docker/ansible du backend n'est **pas encore** recâblée en natif (patchs dans `patch_ssd-backend.sh`). |
+
+#### Notion de *bundle*
+
+Un `vars/<app>.yml` avec une ligne `members: a b c` (et pas de `kind:`) est un **bundle** :
+`install_native_app.sh` installe chaque membre dans l'ordre puis lance le `bundle_render:`
+optionnel (config reverse-proxy partagée). Pas de LaunchAgent propre.
+
+#### `kind: python`
+
+`brew python@<python_version>` (déf. `3.12`), venv sous `<storage>/native/<app>/venv`,
+`build_cmd` exécuté avec le venv activé (poetry/pip visent le venv). Voir `vars/ssd-backend.yml`.
+
+#### hook `post_fetch:`
+
+Script `includes/nativeapps/<x>.sh` lancé après chaque `(re)clone` et avant le build (reçoit
+`<src_dir> <data_dir>`). Pour les patchs locaux à réappliquer après le `git reset --hard` de
+chaque mise à jour — voir `patch_ssd-backend.sh` (garde-fous Docker, `SSD_DATA_DIR`, secret JWT)
+et `patch_ssd-frontend.sh` (génère `config/servers.json` depuis la clé API du backend).
+
+Jetons substitués dans les valeurs et le bloc `env:` : `__APP_DATA_DIR__`, `__APP_SRC_DIR__`
+(racine du dépôt cloné), `__SETTINGS_SOURCE__` (racine du dépôt ssdv2).
 
 Les ~180 autres applications restent **Docker uniquement** pour l'instant et l'indiquent
 clairement. En ajouter au catalogue natif = un fichier `nativeapps/vars/<app>.yml` de plus,
