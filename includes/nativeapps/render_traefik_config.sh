@@ -61,10 +61,11 @@ BIND="${SSD_TRAEFIK_BIND:-127.0.0.1}"
 # expected here — tune via the SSD_TRAEFIK_* env vars).
 if [ -f "${DATA_DIR}/traefik.yml" ] && \
    { ! grep -q "127.0.0.1:${DASH_PORT}" "${DATA_DIR}/traefik.yml" || \
-     ! grep -q "\"${BIND}:${HTTP_PORT}\"" "${DATA_DIR}/traefik.yml"; }; then
+     ! grep -q "\"${BIND}:${HTTP_PORT}\"" "${DATA_DIR}/traefik.yml" || \
+     ! grep -q "forwardedHeaders" "${DATA_DIR}/traefik.yml"; }; then
   cp "${DATA_DIR}/traefik.yml" "${DATA_DIR}/traefik.yml.bak"
   rm -f "${DATA_DIR}/traefik.yml"
-  echo " * static config obsolète (port/bind changés) -> régénération (ancien: traefik.yml.bak)"
+  echo " * static config obsolète (port/bind/headers changés) -> régénération (ancien: traefik.yml.bak)"
 fi
 if [ ! -f "${DATA_DIR}/traefik.yml" ]; then
   cat > "${DATA_DIR}/traefik.yml" <<EOF
@@ -91,8 +92,15 @@ accessLog:
 entryPoints:
   web:
     address: "${BIND}:${HTTP_PORT}"
+    # Trust X-Forwarded-* from cloudflared (loopback) so the real https scheme
+    # reaches the apps — SvelteKit's CSRF check ("Cross-site POST form
+    # submissions are forbidden") needs it to rebuild the right Origin.
+    forwardedHeaders:
+      trustedIPs: ["127.0.0.1/32", "::1/128"]
   websecure:
     address: "${BIND}:${HTTPS_PORT}"
+    forwardedHeaders:
+      trustedIPs: ["127.0.0.1/32", "::1/128"]
   traefik:
     address: "127.0.0.1:${DASH_PORT}"
 
@@ -139,6 +147,10 @@ is_bundle_member() { case "${BUNDLE_MEMBERS}" in *" $1 "*) return 0 ;; *) return
     printf "      rule: \"%s\"\n" "$(app_rule "${app}")"
     printf "      entryPoints: ['web']\n"
     printf "      service: '%s'\n" "${app}"
+    # Beat the WebUI bundle's host-less PathPrefix routers (webui.yml:
+    # /api/v1 @100, / @10). Without this, <app>.<domain>/api/v1/... is
+    # hijacked by webui-backend — broke AIOStreams' frontend (2026-09-01).
+    printf "      priority: 200\n"
   done
   echo "  services:"
   for f in "${VARS_DIR}"/*.yml; do
