@@ -339,6 +339,62 @@ def p_checkfile(t):
         '        return {"exists": True}\n', 1)
 patch("src/routers/secure/script.py", p_checkfile)
 
+# --- 9. seasonarr Sonarr instances: the fork hard-codes the Sonarr URL to the
+#        Docker bridge (172.17.0.1 / sonarr:8989). Make it env-driven (SONARR_URL)
+#        and auto-seed one instance from the local Sonarr config.xml on first
+#        GET /sonarr in native mode. -------------------------------------------
+def p_seasonarr_sonarr(t):
+    if "_ssd_seed_sonarr" in t:
+        return t
+    # env-driven URL everywhere it's hard-coded
+    t = t.replace('"http://172.17.0.1:8989"  # ⚡ forcé',
+                  'os.getenv("SONARR_URL", "http://172.17.0.1:8989")  ' + MARK, 1)
+    t = t.replace('instance.url = "http://172.17.0.1:8989"',
+                  'instance.url = os.getenv("SONARR_URL", "http://172.17.0.1:8989")  ' + MARK, 1)
+    # module-level helper, injected right after the router objects
+    anchor = 'router_ws = APIRouter(tags=["seasonarr-ws"])    # WebSocket\n'
+    helper = (anchor +
+        '\n'
+        'def _ssd_seed_sonarr(db, owner_id):  ' + MARK + '\n'
+        '    """Auto-create a Sonarr instance from the local Sonarr config.xml."""\n'
+        '    import xml.etree.ElementTree as _ET\n'
+        '    for _p in ("~/.config/Sonarr/config.xml",\n'
+        '               "~/Library/Application Support/Sonarr/config.xml"):\n'
+        '        _f = os.path.expanduser(_p)\n'
+        '        if not os.path.isfile(_f):\n'
+        '            continue\n'
+        '        try:\n'
+        '            _r = _ET.parse(_f).getroot()\n'
+        '            _key = (_r.findtext("ApiKey") or "").strip()\n'
+        '            _port = (_r.findtext("Port") or "8989").strip()\n'
+        '        except Exception:\n'
+        '            continue\n'
+        '        if not _key:\n'
+        '            continue\n'
+        '        _inst = SonarrInstance(name="Sonarr",\n'
+        '                               url=os.getenv("SONARR_URL", f"http://127.0.0.1:{_port}"),\n'
+        '                               api_key=_key, owner_id=owner_id, is_active=True)\n'
+        '        db.add(_inst); db.commit(); db.refresh(_inst)\n'
+        '        return _inst\n'
+        '    return None\n')
+    t = t.replace(anchor, helper, 1)
+    # lazy-seed in GET /sonarr
+    t = t.replace(
+        '        .order_by(SonarrInstance.created_at.desc())\n'
+        '        .all()\n'
+        '    )\n'
+        '    return instances\n',
+        '        .order_by(SonarrInstance.created_at.desc())\n'
+        '        .all()\n'
+        '    )\n'
+        '    if not instances and os.getenv("SSD_NATIVE"):  ' + MARK + '\n'
+        '        _s = _ssd_seed_sonarr(db, current_user.id)\n'
+        '        if _s:\n'
+        '            instances = [_s]\n'
+        '    return instances\n', 1)
+    return t
+patch("src/integrations/seasonarr/api/routers.py", p_seasonarr_sonarr)
+
 if changed:
     print("   patched: " + ", ".join(changed))
 else:

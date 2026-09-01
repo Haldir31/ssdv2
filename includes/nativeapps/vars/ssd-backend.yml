@@ -38,6 +38,9 @@ env:
   SCRIPTS_DIR: __SETTINGS_SOURCE__/includes/nativeapps/scripts
   SETTINGS_SOURCE: __SETTINGS_SOURCE__
   SSD_NATIVE: "1"
+  # seasonarr : URL Sonarr locale (le fork la code en dur sur 172.17.0.1). Une
+  # instance est auto-créée depuis ~/.config/Sonarr/config.xml au 1er GET /sonarr.
+  SONARR_URL: http://127.0.0.1:8989
   LOG_LEVEL: INFO
   # Traefik web entrypoint is plain HTTP (127.0.0.1:8000) — Secure cookies would
   # be dropped by the browser and the seasonarr login/onboarding would loop.
