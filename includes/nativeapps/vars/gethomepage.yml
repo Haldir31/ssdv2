@@ -1,0 +1,21 @@
+# Native (non-Docker) definition for gethomepage / homepage.dev
+# Docker equivalent: includes/dockerapps/vars/gethomepage.yml
+# Next.js app (output: "standalone"), enforces pnpm, config-file driven
+# (services.yaml / settings.yaml / widgets.yaml) — no database.
+# After first start, put your config files in:
+#   <storage>/native/gethomepage/src/.next/standalone/config/
+name: gethomepage
+kind: node
+repo: https://github.com/gethomepage/homepage.git
+ref: main
+node_version: 22
+build_cmd: corepack enable pnpm && pnpm install --frozen-lockfile && pnpm build && cp -R .next/static .next/standalone/.next/static && cp -R public .next/standalone/public
+start_cmd: cd .next/standalone && exec node server.js
+port: 3050
+health_path: /
+data_dir: gethomepage
+env:
+  PORT: 3050
+  HOSTNAME: 127.0.0.1
+  HOMEPAGE_ALLOWED_HOSTS: localhost:3050,127.0.0.1:3050
+  NEXT_TELEMETRY_DISABLED: 1

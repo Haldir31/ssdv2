@@ -1,0 +1,21 @@
+# Native (non-Docker) definition for decypharr (debrid -> symlink manager)
+# Docker equivalent: includes/dockerapps/vars/decypharr.yml (image cy01/blackhole)
+# Upstream: https://github.com/sirrobot01/decypharr  (Go 1.26, CGO_ENABLED=1)
+#
+# Requires macFUSE (already installed on this Mac for the infinidysk mount).
+# On first run, edit <storage>/native/decypharr/config.json with your
+# AllDebrid / RealDebrid token(s) and mount/library paths, then:
+#   launchctl kickstart -k gui/$(id -u)/com.ssd.decypharr
+# Health: http://localhost:8282/version  (returns {"version":...,"channel":...},
+# served outside the auth-gated routes — unlike /, which can 302 to /login)
+name: decypharr
+kind: go
+repo: https://github.com/sirrobot01/decypharr.git
+ref: main
+build_cmd: CGO_ENABLED=1 go build -trimpath -ldflags "-w -s" -o decypharr .
+start_cmd: ./decypharr --config "$DECYPHARR_CONFIG_DIR"
+port: 8282
+health_path: /version
+data_dir: decypharr
+env:
+  DECYPHARR_CONFIG_DIR: __APP_DATA_DIR__
