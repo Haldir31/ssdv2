@@ -1,0 +1,42 @@
+# UTOPEER / athanor — decentralised Nostr content indexer  (u2p.network)
+# Upstream: https://git.u2p.network/u2p/u2p-node  (Go 1.25 backend + SvelteKit
+#   frontend embedded → one binary). Torznab API at /api/torznab (Prowlarr /
+#   *arr compatible). Setup wizard at the web UI on first run: identity (Nostr
+#   keypair), relay preset, optional TMDB/OMDB enrichment keys.
+#
+# Config: PostgreSQL driver (native postgresql@18, role+db `athanor`; the
+#   SQLite path hits an Atlas FTS5 shadow-table diff bug). Embedded Khatru
+#   Nostr relay moved off :9998 (c411-proxy) to :39998. Telemetry mode=test
+#   (noop OTel, no export). Curator + Meilisearch OFF (both optional — SQL
+#   search fallback; the curator is a separate Python microservice).
+#   Tor is MANDATORY (hard killswitch, no disable) -> native `com.haldir.tor`
+#   (SOCKS 127.0.0.1:9050, control 9051, cookie auth).
+# First-run: open https://u2p.jmiflix.fr and complete the wizard.
+name: u2p
+kind: go
+repo: https://git.u2p.network/u2p/u2p-node.git
+ref: main
+build_cmd: cd web && pnpm install && pnpm run build && cd .. && rm -rf internal/api/static && cp -r web/build internal/api/static && CGO_ENABLED=0 go build -trimpath -ldflags "-w -s" -o u2p ./cmd/athanor
+start_cmd: ./u2p
+port: 9999
+health_path: /
+data_dir: u2p
+env:
+  ATHANOR_DATA_DIR: __APP_DATA_DIR__
+  ATHANOR_SERVER_HOST: 127.0.0.1
+  ATHANOR_SERVER_PORT: "9999"
+  ATHANOR_RELAY_LISTEN: 127.0.0.1:39998
+  ATHANOR_TELEMETRY_MODE: test
+  ATHANOR_TOR_SOCKS_ADDR: 127.0.0.1:9050
+  ATHANOR_TOR_CONTROL_ADDR: 127.0.0.1:9051
+  ATHANOR_TOR_CONTROL_COOKIE: /Users/haldir/seedbox/native/tor/control.authcookie
+  ATHANOR_TOR_HOSTNAME_FILE: __APP_DATA_DIR__/onion_hostname
+  ATHANOR_DATABASE_DRIVER: postgres
+  ATHANOR_DATABASE_POSTGRES_HOST: 127.0.0.1
+  ATHANOR_DATABASE_POSTGRES_PORT: "5432"
+  ATHANOR_DATABASE_POSTGRES_DATABASE: athanor
+  ATHANOR_DATABASE_POSTGRES_USER: athanor
+  ATHANOR_DATABASE_POSTGRES_PASSWORD: ***REMOVED-CREDENTIAL***
+  ATHANOR_DATABASE_POSTGRES_SSLMODE: disable
+  ATHANOR_CURATOR_ENABLED: "false"
+  ATHANOR_MEILISEARCH_ENABLED: "false"
