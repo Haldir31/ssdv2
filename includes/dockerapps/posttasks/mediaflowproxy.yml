@@ -1,0 +1,17 @@
+---
+- name: Read the persistent MediaFlow API password
+  ansible.builtin.set_fact:
+    mediaflowproxy_api_password: "{{ lookup('password', settings.storage + '/docker/' + lookup('env','USER') + '/' + pgrole + '/api_password length=64 chars=ascii_letters,digits') }}"
+  no_log: true
+
+- name: Display MediaFlow Proxy installation details
+  ansible.builtin.debug:
+    msg:
+      - "=============================================="
+      - "MEDIAFLOW PROXY - INSTALLATION TERMINEE"
+      - "=============================================="
+      - "URL : https://{{ sub[pgrole][pgrole] if sub_enabled else pgrole }}.{{ user.domain }}"
+      - "API_PASSWORD : {{ mediaflowproxy_api_password }}"
+      - "Redis : redis-mediaflowproxy (healthy)"
+      - "Utilisez cette clé dans le paramètre api_password des URLs MediaFlow."
+      - "=============================================="

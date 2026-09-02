@@ -768,6 +768,9 @@ function suppression_appli() {
         manage_account_yml sub.streamfusion " "
     fi
     ;;
+  mediaflowproxy)
+    docker rm -f redis-mediaflowproxy >/dev/null 2>&1
+    ;;
   coolify)
     # Supprimer tous les conteneurs dont le nom contient 'coolify'
     docker ps -a --filter "name=coolify" --format "{{.ID}}" | xargs -r docker rm -f
@@ -1622,5 +1625,4 @@ update_containers() {
 function decypharr() {
 launch_service decypharr
 }
-
 

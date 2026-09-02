@@ -2,28 +2,27 @@
 pgrole: 'mediaflowproxy'
 intport: '8888'
 image: 'mhdzumair/mediaflow-proxy:latest'
+
 pg_env:
-  API_PASSWORD: mediaflowproxy
-  FORWARDED_ALLOW_IPS: "*"
+  API_PASSWORD: "{{ lookup('password', settings.storage + '/docker/' + lookup('env','USER') + '/' + pgrole + '/api_password length=64 chars=ascii_letters,digits') }}"
+  REDIS_URL: 'redis://redis-mediaflowproxy:6379'
+  FORWARDED_ALLOW_IPS: "{{ mediaflowproxy_forwarded_allow_ips }}"
+  GUNICORN_WORKERS: '4'
+  ENABLE_HLS_PREBUFFER: 'true'
+  ENABLE_DASH_PREBUFFER: 'true'
+  M3U8_CONTENT_ROUTING: 'mediaflow'
+  ENABLE_ACESTREAM: 'false'
+  ENABLE_TELEGRAM: 'false'
+  DISABLE_DOCS: 'true'
+  DISABLE_SPEEDTEST: 'true'
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+# Streaming clients need to reach the API with api_password instead of an
+# additional browser-oriented Traefik authentication middleware.
+extra_labels:
+  traefik.http.routers.mediaflowproxy-public-rtr.entrypoints: 'http,https'
+  traefik.http.routers.mediaflowproxy-public-rtr.rule: "Host(`{{ sub[pgrole][pgrole] if sub_enabled else pgrole }}.{{ user.domain }}`)"
+  traefik.http.routers.mediaflowproxy-public-rtr.priority: '100'
+  traefik.http.routers.mediaflowproxy-public-rtr.tls: 'true'
+  traefik.http.routers.mediaflowproxy-public-rtr.tls.certresolver: 'letsencrypt'
+  traefik.http.routers.mediaflowproxy-public-rtr.middlewares: 'chain-no-auth@file'
+  traefik.http.routers.mediaflowproxy-public-rtr.service: 'mediaflowproxy-svc'
