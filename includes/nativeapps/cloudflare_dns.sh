@@ -68,6 +68,42 @@ if [ -z "${CF_ZONE_ID}" ]; then
   [ -n "${CF_ZONE_ID}" ] || { warn "zone ${SSD_DOMAIN} introuvable (le token a-t-il Zone:Read ? sinon poser CF_ZONE_ID)."; exit 1; }
 fi
 
+# --- mode retrait : SSD_CF_RM="app1 app2" -> supprime CNAME + entrée d'ingress
+# (appelé par scripts/suppression.sh lors d'un désinstall). -----------------
+if [ -n "${SSD_CF_RM:-}" ]; then
+  RM_FQDN=""; for a in ${SSD_CF_RM}; do RM_FQDN="${RM_FQDN} ${a}.${SSD_DOMAIN}"; done
+  say "Retrait Cloudflare :${RM_FQDN}"
+  CFG="$(cf "${API}/accounts/${CF_ACCOUNT_ID}/cfd_tunnel/${SSD_TUNNEL_ID}/configurations")"
+  if echo "${CFG}" | ok; then
+    WORK="$(mktemp -d)"; trap 'rm -rf "${WORK}"' EXIT
+    CFG_JSON="${CFG}" RM_FQDN="${RM_FQDN}" OUT="${WORK}" /usr/bin/python3 - <<'PY'
+import json, os
+d = json.loads(os.environ["CFG_JSON"]); cfg = d["result"].get("config") or {}
+drop = set(os.environ["RM_FQDN"].split())
+ing = cfg.get("ingress") or []
+cfg["ingress"] = [e for e in ing if e.get("hostname") not in drop]
+changed = len(ing) != len(cfg["ingress"])
+open(os.path.join(os.environ["OUT"], "cfg.json"), "w").write(json.dumps({"config": cfg}))
+open(os.path.join(os.environ["OUT"], "changed"), "w").write("1" if changed else "")
+PY
+    if [ -n "$(cat "${WORK}/changed")" ] && [ "${DRY}" != "1" ]; then
+      cf -X PUT "${API}/accounts/${CF_ACCOUNT_ID}/cfd_tunnel/${SSD_TUNNEL_ID}/configurations" \
+        --data "@${WORK}/cfg.json" | ok && echo -e " ${GREEN}* ingress nettoyé${NC}" || warn "PUT ingress échoué"
+    else
+      echo " * ingress déjà propre"
+    fi
+  else
+    warn "lecture config tunnel échouée — ingress non nettoyé"
+  fi
+  for fqdn in ${RM_FQDN}; do
+    rid="$(cf "${API}/zones/${CF_ZONE_ID}/dns_records?type=CNAME&name=${fqdn}" | /usr/bin/python3 -c "import json,sys;r=json.load(sys.stdin).get('result') or [];print(r[0]['id'] if r else '')" 2>/dev/null || true)"
+    if [ -z "${rid}" ]; then echo " * DNS ${fqdn} absent"; elif [ "${DRY}" = "1" ]; then echo -e " ${YELLOW}[dry] DNS ${fqdn} à supprimer${NC}";
+    else cf -X DELETE "${API}/zones/${CF_ZONE_ID}/dns_records/${rid}" | ok && echo -e " ${GREEN}* DNS ${fqdn} supprimé${NC}" || warn "DELETE DNS ${fqdn} échoué"; fi
+  done
+  say "Retrait Cloudflare terminé."
+  exit 0
+fi
+
 # --- liste des hostnames à publier -----------------------------------------
 # Par défaut : toutes les apps natives avec un port + webui.
 # SSD_CF_HOSTS="a b c" pour restreindre à ces apps-là.
