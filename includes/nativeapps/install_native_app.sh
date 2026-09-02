@@ -125,7 +125,7 @@ done < "${VARS_FILE}"
 if [ -n "${members}" ]; then
   echo -e "${BLUE}### ${NAME} — bundle natif (${members}) ###${NC}"
   for _m in ${members}; do
-    "${SCRIPT_DIR}/install_native_app.sh" "${_m}"
+    SSD_SKIP_CF=1 "${SCRIPT_DIR}/install_native_app.sh" "${_m}"
   done
   if [ -n "${bundle_render}" ]; then
     if [ -x "${SCRIPT_DIR}/${bundle_render}" ]; then
@@ -134,6 +134,12 @@ if [ -n "${members}" ]; then
     else
       echo -e "${YELLOW} * bundle_render introuvable/non exécutable : ${SCRIPT_DIR}/${bundle_render}${NC}" >&2
     fi
+  fi
+  # Cloudflare : publie le hostname du bundle (routage par préfixe côté Traefik).
+  # Auto-neutralisé si SSD_CF_DNS != 1. Voir le hook équivalent en fin de script.
+  if [ -z "${SSD_SKIP_CF:-}" ] && [ -x "${SCRIPT_DIR}/cloudflare_dns.sh" ]; then
+    SSD_CF_HOSTS="${NAME}" "${SCRIPT_DIR}/cloudflare_dns.sh" "${STORAGE_ROOT}/traefik" || \
+      echo -e " ${YELLOW}* publication Cloudflare de ${NAME} ignorée/échouée${NC}" >&2
   fi
   echo -e " ${GREEN}--> bundle ${NAME} installé (${members})${NC}"
   exit 0
@@ -297,5 +303,27 @@ if [ -n "${port}" ]; then
     echo -e " ${GREEN}--> ${NAME} répond sur http://127.0.0.1:${port}${NC}"
   else
     echo -e " ${YELLOW}--> ${NAME} ne répond pas encore — voir ${LOG_DIR}/${NAME}.err.log${NC}"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# Cloudflare : publie <app>.<domaine> via le tunnel (CNAME + ingress)
+# ---------------------------------------------------------------------------
+# Fait partie de CHAQUE install d'app native. cloudflare_dns.sh s'auto-neutralise
+# si SSD_CF_DNS != 1 (env ou ~/.config/ssd/cloudflare.env) — donc no-op tant que
+# l'utilisateur n'a pas posé le marqueur. Ne concerne que les apps avec un port ;
+# `traefik` publie déjà depuis render_traefik_config.sh ; les membres de bundle
+# sont routés par leur bundle (pas de hostname propre).
+if [ -n "${port}" ] && [ "${NAME}" != "traefik" ] && [ -z "${SSD_SKIP_CF:-}" ] \
+   && [ -x "${SCRIPT_DIR}/cloudflare_dns.sh" ]; then
+  _is_member=0
+  for _bf in "${SCRIPT_DIR}"/vars/*.yml; do
+    case " $(sed -n 's/^members:[[:space:]]*//p' "${_bf}" 2>/dev/null) " in
+      *" ${NAME} "*) _is_member=1 ;;
+    esac
+  done
+  if [ "${_is_member}" -eq 0 ]; then
+    SSD_CF_HOSTS="${NAME}" "${SCRIPT_DIR}/cloudflare_dns.sh" "${STORAGE_ROOT}/traefik" || \
+      echo -e " ${YELLOW}* publication Cloudflare de ${NAME} ignorée/échouée (voir ci-dessus)${NC}" >&2
   fi
 fi

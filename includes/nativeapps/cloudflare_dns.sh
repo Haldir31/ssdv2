@@ -27,11 +27,13 @@ RED="${RED:-\033[0;31m}"; BLUE="${BLUE:-\033[0;36m}"; NC="${NC:-\033[0m}"
 say(){ echo -e "${BLUE}==>${NC} $*"; }
 warn(){ echo -e " ${YELLOW}!${NC} $*" >&2; }
 
-[ "${SSD_CF_DNS:-}" = "1" ] || { warn "SSD_CF_DNS != 1 — publication Cloudflare ignorée."; exit 0; }
-
 # --- config -----------------------------------------------------------------
+# Sourced BEFORE the SSD_CF_DNS gate so the marker can live in this file
+# (SSD_CF_DNS=1) and every `install_native_app.sh <app>` then auto-publishes.
 CF_ENV="${HOME}/.config/ssd/cloudflare.env"
 [ -f "${CF_ENV}" ] && . "${CF_ENV}"
+
+[ "${SSD_CF_DNS:-}" = "1" ] || { warn "SSD_CF_DNS != 1 — publication Cloudflare ignorée."; exit 0; }
 
 DATA_DIR="${1:-}"
 BSET=""
@@ -73,8 +75,13 @@ FILTER=" ${SSD_CF_HOSTS:-} "
 HOSTS=""
 for f in "${VARS_DIR}"/*.yml; do
   app="$(basename "${f}" .yml)"
-  [ "${app}" = "traefik" ] && continue
   [ "${FILTER}" != "  " ] && case "${FILTER}" in *" ${app} "*) : ;; *) continue ;; esac
+  # traefik: only publish it when its dashboard is actually exposed on the web
+  # entrypoint (render_traefik_config.sh wrote dynamic/dashboard.yml).
+  if [ "${app}" = "traefik" ]; then
+    [ -f "${DATA_DIR}/dynamic/dashboard.yml" ] && HOSTS="${HOSTS} traefik"
+    continue
+  fi
   if [ "${app}" = "webui" ]; then HOSTS="${HOSTS} webui"; continue; fi
   grep -qE '^port:[[:space:]]*[0-9]' "${f}" && HOSTS="${HOSTS} ${app}"
 done

@@ -31,6 +31,11 @@ env:
   INSTANCE: private
   NODE_ENV: production
   REDIS_URL: redis://127.0.0.1:6379/8
+  # Private instance has NO login screen by default (anyone who reaches it is
+  # in). Set both to require a username/password — needed since it's published
+  # on the Cloudflare tunnel.
+  SLICKSYNC_PRIVATE_USERNAME: haldir
+  SLICKSYNC_PRIVATE_PASSWORD: ***REMOVED-CREDENTIAL***
   # Live "Now Playing" presence via the native AIOStreams proxy (optional).
   AIOSTREAMS_URL: https://aiostreams.jmiflix.fr
   AIOSTREAMS_AUTH_USERNAME: haldir
