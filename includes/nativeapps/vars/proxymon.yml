@@ -1,0 +1,28 @@
+# proxymon — supervision dashboard for the indexer proxies (c411 / tr4ker /
+#   yggreborn) that feed StreamFusion Reborn. FastAPI single-file app: live
+#   health + performance-history charts (Chart.js), FTS5 search over each
+#   proxy's SQLite torrent mirror, live log tail, one-click recrawl.
+#
+# Auth: form-based session login (signed timed cookie, password-manager
+#   friendly) — NOT HTTP Basic. Creds in the env block below.
+# Data: metrics.db (health-poll history, 30-day retention) under the data dir.
+# Read-only against the proxy mirrors (~/{c411,tr4ker}-proxy/torrents.db) and
+#   their logs (~/Library/Logs/<proxy>/{out,err}.log) — same user, so paths
+#   resolve directly at runtime.
+name: proxymon
+kind: python
+repo: /Users/haldir/src/proxymon
+ref: main
+build_cmd: pip install -q -r requirements.txt
+start_cmd: exec python -m uvicorn app:app --host 127.0.0.1 --port 8770 --log-level info
+port: 8770
+health_path: /healthz
+data_dir: proxymon
+env:
+  PROXYMON_USER: haldir
+  PROXYMON_PASSWORD: "1dehCvqiNjkSe3AYp5d72X4M"
+  PROXYMON_SECRET: "***REMOVED-CREDENTIAL***"
+  PROXYMON_METRICS_DB: __APP_DATA_DIR__/metrics.db
+  PROXYMON_SESSION_HOURS: "168"
+  PROXYMON_POLL_SECONDS: "60"
+  PROXYMON_COOKIE_SECURE: "false"
