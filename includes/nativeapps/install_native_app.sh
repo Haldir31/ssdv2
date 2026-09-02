@@ -6,7 +6,8 @@
 # includes/dockerapps/templates/generique/generique.yml (which calls the
 # Ansible `docker_container` module). Instead of a container, it:
 #   - fetches the app         (git clone/pull, or `brew install`)
-#   - builds it               (kind: node -> npm ; kind: go -> go build ;
+#   - builds it               (kind: node -> npm/pnpm ; kind: bun -> bun ;
+#                              kind: go -> go build ; kind: python -> venv+pip ;
 #                              kind: brew -> nothing)
 #   - renders config          (optional, via `config_render`)
 #   - writes + loads a LaunchAgent  (templates/launchagent.plist.tpl)
@@ -179,6 +180,15 @@ case "${kind}" in
     ;;
   go)
     command -v go >/dev/null 2>&1 || brew install go
+    fetch_src
+    ( cd "${APP_SRC_DIR}" && PATH="/opt/homebrew/bin:${PATH}" bash -c "${build_cmd}" )
+    WORKDIR="${APP_SRC_DIR}"
+    ;;
+  bun)
+    # Bun-based apps (Next.js / Express monorepos published as an oven/bun image
+    # upstream). One toolchain — bun runs the JS, `bunx` replaces npx (prisma,
+    # next, …). node@X is NOT installed for these.
+    command -v bun >/dev/null 2>&1 || brew install oven-sh/bun/bun
     fetch_src
     ( cd "${APP_SRC_DIR}" && PATH="/opt/homebrew/bin:${PATH}" bash -c "${build_cmd}" )
     WORKDIR="${APP_SRC_DIR}"

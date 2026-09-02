@@ -1,0 +1,39 @@
+# Native (non-Docker) definition for SlickSync.
+# Docker equivalent: includes/dockerapps/vars/slicksync.yml
+#   (image ghcr.io/slicknsliding/slicksync:private)
+# Upstream: github.com/slicknsliding/slicksync — Bun monorepo: an Express API
+# (server/) + a Next.js 16 frontend (client/), Prisma ORM. "private" instance =
+# single-household mode, embedded SQLite. Manages Stremio/Nuvio addons, users,
+# shared credentials, watch history and live playback for a private group.
+#
+# The one image runs BOTH processes internally (scripts/start.sh); run_slicksync.sh
+# is the native port of that. Only the Next.js frontend is public — it proxies
+# /api,/proxy,/trax,/uploads,/invite to the backend on loopback (next.config.ts
+# rewrites). Frontend :3060 (3000 = tracearr), backend :4000 (loopback only,
+# hard-coded as the rewrite target).
+#
+# JWT_SECRET is generated once by gen_secret.sh; ENCRYPTION_KEY auto-generates
+# into <data>/data/ on first boot. SQLite DB + backups live under <data>/data/
+# (kept out of the source tree so a `git reset --hard` update can't wipe them).
+name: slicksync
+kind: bun
+repo: https://github.com/slicknsliding/slicksync.git
+ref: main
+post_fetch: gen_secret.sh
+build_cmd: bun install --frozen-lockfile && (cd client && bun install --frozen-lockfile) && cp -f prisma/schema.sqlite.prisma prisma/schema.prisma && bunx prisma generate --schema prisma/schema.prisma && (cd client && bun run build)
+start_cmd: exec bash __SETTINGS_SOURCE__/includes/nativeapps/run_slicksync.sh __APP_SRC_DIR__ __APP_DATA_DIR__
+port: 3060
+health_path: /
+data_dir: slicksync
+env:
+  FRONTEND_PORT: "3060"
+  BACKEND_PORT: "4000"
+  INSTANCE: private
+  NODE_ENV: production
+  REDIS_URL: redis://127.0.0.1:6379/8
+  # Live "Now Playing" presence via the native AIOStreams proxy (optional).
+  AIOSTREAMS_URL: https://aiostreams.jmiflix.fr
+  AIOSTREAMS_AUTH_USERNAME: haldir
+  AIOSTREAMS_AUTH_PASSWORD: ***REMOVED-CREDENTIAL***
+  # Used only to build clickable links in Discord notifications.
+  PUBLIC_APP_URL: https://slicksync.jmiflix.fr
