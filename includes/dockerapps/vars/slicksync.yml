@@ -1,0 +1,14 @@
+---
+pgrole: 'slicksync'
+intport: '3000'
+image: 'ghcr.io/slicknsliding/slicksync:private'
+
+pg_volumes:
+  - "{{ settings.storage }}/docker/{{ lookup('env','USER') }}/{{ pgrole }}:/app/data:rw"
+
+pg_env:
+  INSTANCE: 'private'
+  JWT_SECRET: "{{ slicksync_jwt_secret }}"
+
+specific_docker_info:
+  user: "{{ lookup('env','MYUID') }}:{{ lookup('env','MYGID') }}"

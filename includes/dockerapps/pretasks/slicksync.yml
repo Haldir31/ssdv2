@@ -1,0 +1,13 @@
+---
+- name: Create persistent directory for {{ pgrole }} secrets
+  become: yes
+  ansible.builtin.file:
+    path: "{{ settings.storage }}/docker/{{ lookup('env','USER') }}/{{ pgrole }}"
+    state: directory
+    mode: '0775'
+    owner: "{{ lookup('env','MYUID') }}"
+    group: "{{ lookup('env','MYGID') }}"
+
+- name: Generate or load the persistent JWT secret for {{ pgrole }}
+  ansible.builtin.set_fact:
+    slicksync_jwt_secret: "{{ lookup('password', settings.storage + '/docker/' + lookup('env','USER') + '/' + pgrole + '/jwt_secret length=64 chars=ascii_letters,digits') }}"

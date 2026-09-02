@@ -1,0 +1,52 @@
+---
+- name: Detect the Traefik Docker network subnet
+  ansible.builtin.command:
+    cmd: >-
+      docker network inspect -f
+      '{% raw %}{{(index .IPAM.Config 0).Subnet}}{% endraw %}'
+      traefik_proxy
+  register: mediaflowproxy_network_subnet
+  changed_when: false
+
+- name: Set the trusted reverse proxy network
+  ansible.builtin.set_fact:
+    mediaflowproxy_forwarded_allow_ips: "{{ mediaflowproxy_network_subnet.stdout | trim }}"
+
+- name: Create the persistent Redis directory
+  become: true
+  ansible.builtin.file:
+    path: "{{ settings.storage }}/docker/{{ lookup('env','USER') }}/{{ pgrole }}/redis"
+    state: directory
+    mode: '0775'
+    owner: "{{ lookup('env','MYUID') }}"
+    group: "{{ lookup('env','MYGID') }}"
+
+- name: Deploy Redis for MediaFlow Proxy
+  community.docker.docker_container:
+    name: redis-mediaflowproxy
+    image: 'redis:7-alpine'
+    restart_policy: unless-stopped
+    volumes:
+      - "{{ settings.storage }}/docker/{{ lookup('env','USER') }}/{{ pgrole }}/redis:/data:rw"
+    networks:
+      - name: traefik_proxy
+    healthcheck:
+      test:
+        - CMD
+        - redis-cli
+        - ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+- name: Wait for MediaFlow Redis to become healthy
+  ansible.builtin.command:
+    cmd: >-
+      docker inspect -f
+      '{% raw %}{{if .State.Health}}{{.State.Health.Status}}{{else}}starting{{end}}{% endraw %}'
+      redis-mediaflowproxy
+  register: mediaflowproxy_redis_status
+  changed_when: false
+  retries: 30
+  delay: 2
+  until: mediaflowproxy_redis_status.stdout | trim == 'healthy'

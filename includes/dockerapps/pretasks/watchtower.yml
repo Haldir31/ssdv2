@@ -8,7 +8,7 @@
 - name: Deploy watchtower
   docker_container:
     name: "watchtower"
-    image: "nickfedor/watchtower:latest"
+    image: "nickfedor/watchtower:1.22.0"
     pull: yes
     command: '--cleanup --schedule "0 0 4 * * *"'
     state: started
