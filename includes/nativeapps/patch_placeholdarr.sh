@@ -47,6 +47,20 @@ if ! grep -q '_APPDATA_DIR' "${PF}"; then
   say "patched ${PF} (/config -> APPDATA_PATH)"
 fi
 
+# --- patch 3: derived library subfolders 'movies'/'tv' -> 'Films'/'Séries' -
+# (user runs a combined library over the existing ~/Medias/{Films,Séries} dirs)
+if grep -q "library_root, 'movies'" core/config.py 2>/dev/null; then
+  perl -CSD -0pi -e "s/os\\.path\\.join\\(library_root, 'movies'\\)/os.path.join(library_root, 'Films')/g;
+                     s/os\\.path\\.join\\(library_root, 'tv'\\)/os.path.join(library_root, 'S\\x{e9}ries')/g" core/config.py
+  say "core/config.py: movies/tv -> Films/Séries"
+fi
+if grep -q 'root, "movies"' services/app_config.py 2>/dev/null; then
+  perl -CSD -0pi -e 's/os\\.path\\.join\\(root, "movies"\\)/os.path.join(root, "Films")/g;
+                     s/os\\.path\\.join\\(root, "tv"\\)/os.path.join(root, "S\\x{e9}ries")/g;
+                     s/for folder_name in \\("movies", "tv"\\):/for folder_name in ("Films", "S\\x{e9}ries"):/g' services/app_config.py
+  say "services/app_config.py: movies/tv -> Films/Séries"
+fi
+
 # --- seed appdata -------------------------------------------------------
 mkdir -p "${DATA}/config"
 for f in dummy.mp4 coming_soon_dummy.mp4; do
