@@ -191,6 +191,183 @@ if MARK not in s:
 PYEOF
 say "patch 5 (byte-unique placeholders) applied"
 
+# --- patch 6: episode playback — series-title fallback --------------------
+# Tracearr's stream_started sends the EPISODE's tvdb/tmdb ids (from Plex), not
+# the show's. Placeholdarr's _try_resolve_episode_from_catalog_ids only matched a
+# Series by tvdb/sonarr id -> "unresolved_episode_playback_kind" -> no Sonarr
+# search on TV placeholder plays. Add a series-title fallback and let a resolved
+# Series/Episode row's ids override the payload's episode-level ids.
+python3 - "${SRC}" <<'PYEOF'
+import sys, pathlib, ast
+ep = pathlib.Path(sys.argv[1]) / "services/source_of_truth/event_playback.py"
+s = ep.read_text(encoding="utf-8")
+if "_extract_series_title" not in s:
+    s = s.replace(
+        "def _extract_imdb_id(payload: dict[str, Any]) -> str | None:",
+        "def _extract_series_title(payload: dict[str, Any]) -> str | None:\n"
+        "    \"\"\"patch_placeholdarr: show title for an episode play (match a Series when the\n"
+        "    webhook carries episode-level or no external ids).\"\"\"\n"
+        "    if _extract_declared_media_type(payload) != 'episode':\n"
+        "        return None\n"
+        "    series = payload.get('series') if isinstance(payload.get('series'), dict) else {}\n"
+        "    media = payload.get('media') if isinstance(payload.get('media'), dict) else {}\n"
+        "    data = payload.get('data') if isinstance(payload.get('data'), dict) else {}\n"
+        "    data_media = data.get('media') if isinstance(data.get('media'), dict) else {}\n"
+        "    for value in (series.get('title'), series.get('name'), media.get('title'),\n"
+        "                  data_media.get('title'), payload.get('grandparentTitle'),\n"
+        "                  payload.get('showTitle'), data_media.get('grandparentTitle')):\n"
+        "        if isinstance(value, str) and value.strip():\n"
+        "            return value.strip()\n"
+        "    return None\n\n\n"
+        "def _extract_imdb_id(payload: dict[str, Any]) -> str | None:", 1)
+
+    s = s.replace(
+        "    season_number: int | None,\n"
+        "    episode_number: int | None,\n"
+        ") -> dict[str, Any] | None:\n"
+        "    if season_number is None or episode_number is None:\n"
+        "        return None\n"
+        "    if tvdb_id is None and sonarr_series_id is None:\n"
+        "        return None\n"
+        "    q = (\n"
+        "        session.query(Episode)\n"
+        "        .join(Season, Episode.season_id == Season.id)\n"
+        "        .join(Series, Season.series_id == Series.id)\n"
+        "        .filter(\n"
+        "            Episode.is_deleted == False,  # noqa: E712\n"
+        "            Series.is_deleted == False,  # noqa: E712\n"
+        "            Season.season_number == season_number,\n"
+        "            Episode.episode_number == episode_number,\n"
+        "        )\n"
+        "    )\n"
+        "    if tvdb_id is not None:\n"
+        "        q = q.filter(Series.tvdbid == int(tvdb_id))\n"
+        "    else:\n"
+        "        q = q.filter(Series.sonarrid == int(sonarr_series_id))\n"
+        "    rows = q.all()\n"
+        "    if not rows:\n"
+        "        return None\n",
+        "    season_number: int | None,\n"
+        "    episode_number: int | None,\n"
+        "    series_title: str | None = None,\n"
+        ") -> dict[str, Any] | None:\n"
+        "    if season_number is None or episode_number is None:\n"
+        "        return None\n"
+        "    if tvdb_id is None and sonarr_series_id is None and not series_title:\n"
+        "        return None\n\n"
+        "    def _base_q():\n"
+        "        return (\n"
+        "            session.query(Episode)\n"
+        "            .join(Season, Episode.season_id == Season.id)\n"
+        "            .join(Series, Season.series_id == Series.id)\n"
+        "            .filter(\n"
+        "                Episode.is_deleted == False,  # noqa: E712\n"
+        "                Series.is_deleted == False,  # noqa: E712\n"
+        "                Season.season_number == season_number,\n"
+        "                Episode.episode_number == episode_number,\n"
+        "            )\n"
+        "        )\n\n"
+        "    q = _base_q()\n"
+        "    if tvdb_id is not None:\n"
+        "        q = q.filter(Series.tvdbid == int(tvdb_id))\n"
+        "    elif sonarr_series_id is not None:\n"
+        "        q = q.filter(Series.sonarrid == int(sonarr_series_id))\n"
+        "    else:\n"
+        "        q = q.filter(Series.title.ilike(str(series_title).strip()))\n"
+        "    rows = q.all()\n"
+        "    if not rows and series_title and (tvdb_id is not None or sonarr_series_id is not None):\n"
+        "        rows = _base_q().filter(Series.title.ilike(str(series_title).strip())).all()\n"
+        "    if not rows:\n"
+        "        return None\n", 1)
+
+    s = s.replace(
+        "    episode_number: int | None,\n"
+        "    declared_media_type: str | None,\n"
+        ") -> dict[str, Any]:\n"
+        "    \"\"\"When path equality fails (Docker / different roots), resolve row + playback_kind from catalog IDs.\"\"\"\n"
+        "    pk = str(path_info.get('playback_kind') or 'unknown')\n"
+        "    if pk not in ('unknown', '', 'none', 'None'):\n"
+        "        return path_info\n"
+        "    merged = dict(path_info)\n\n"
+        "    episode_first = declared_media_type == 'episode' or (\n"
+        "        season_number is not None and episode_number is not None and (tvdb_id is not None or sonarr_series_id is not None)\n"
+        "    )\n"
+        "    if episode_first:\n"
+        "        cat = _try_resolve_episode_from_catalog_ids(\n"
+        "            session,\n"
+        "            tvdb_id=tvdb_id,\n"
+        "            sonarr_series_id=sonarr_series_id,\n"
+        "            season_number=season_number,\n"
+        "            episode_number=episode_number,\n"
+        "        )\n",
+        "    episode_number: int | None,\n"
+        "    declared_media_type: str | None,\n"
+        "    series_title: str | None = None,\n"
+        ") -> dict[str, Any]:\n"
+        "    \"\"\"When path equality fails (Docker / different roots), resolve row + playback_kind from catalog IDs.\"\"\"\n"
+        "    pk = str(path_info.get('playback_kind') or 'unknown')\n"
+        "    if pk not in ('unknown', '', 'none', 'None'):\n"
+        "        return path_info\n"
+        "    merged = dict(path_info)\n\n"
+        "    episode_first = declared_media_type == 'episode' or (\n"
+        "        season_number is not None and episode_number is not None\n"
+        "        and (tvdb_id is not None or sonarr_series_id is not None or bool(series_title))\n"
+        "    )\n"
+        "    if episode_first:\n"
+        "        cat = _try_resolve_episode_from_catalog_ids(\n"
+        "            session,\n"
+        "            tvdb_id=tvdb_id,\n"
+        "            sonarr_series_id=sonarr_series_id,\n"
+        "            season_number=season_number,\n"
+        "            episode_number=episode_number,\n"
+        "            series_title=series_title,\n"
+        "        )\n", 1)
+
+    s = s.replace(
+        "    declared_media_type = _extract_declared_media_type(payload)\n"
+        "    path_info = _resolve_media_from_path(session, file_path)\n"
+        "    path_info = _merge_path_info_with_catalog_ids(\n"
+        "        session,\n"
+        "        path_info,\n"
+        "        tmdb_id=tmdb_id,\n"
+        "        tvdb_id=tvdb_id,\n"
+        "        imdb_id=imdb_id,\n"
+        "        sonarr_series_id=sonarr_series_id,\n"
+        "        season_number=season_number,\n"
+        "        episode_number=episode_number,\n"
+        "        declared_media_type=declared_media_type,\n"
+        "    )\n\n"
+        "    if tmdb_id is None and path_info.get('tmdb_id') is not None:\n"
+        "        tmdb_id = int(path_info['tmdb_id'])\n"
+        "    if tvdb_id is None and path_info.get('tvdb_id') is not None:\n"
+        "        tvdb_id = int(path_info['tvdb_id'])\n",
+        "    declared_media_type = _extract_declared_media_type(payload)\n"
+        "    series_title = _extract_series_title(payload)\n"
+        "    path_info = _resolve_media_from_path(session, file_path)\n"
+        "    path_info = _merge_path_info_with_catalog_ids(\n"
+        "        session,\n"
+        "        path_info,\n"
+        "        tmdb_id=tmdb_id,\n"
+        "        tvdb_id=tvdb_id,\n"
+        "        imdb_id=imdb_id,\n"
+        "        sonarr_series_id=sonarr_series_id,\n"
+        "        season_number=season_number,\n"
+        "        episode_number=episode_number,\n"
+        "        declared_media_type=declared_media_type,\n"
+        "        series_title=series_title,\n"
+        "    )\n\n"
+        "    _resolved_row = path_info.get('series_id') is not None or path_info.get('movie_id') is not None\n"
+        "    if path_info.get('tmdb_id') is not None and (tmdb_id is None or _resolved_row):\n"
+        "        tmdb_id = int(path_info['tmdb_id'])\n"
+        "    if path_info.get('tvdb_id') is not None and (tvdb_id is None or _resolved_row):\n"
+        "        tvdb_id = int(path_info['tvdb_id'])\n", 1)
+
+    ast.parse(s)
+    ep.write_text(s, encoding="utf-8")
+    print(" * event_playback.py: episode series-title fallback")
+PYEOF
+say "patch 6 (episode series-title fallback) applied"
+
 # --- seed appdata -------------------------------------------------------
 mkdir -p "${DATA}/config"
 for f in dummy.mp4 coming_soon_dummy.mp4; do
