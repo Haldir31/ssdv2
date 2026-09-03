@@ -1,0 +1,23 @@
+# reborn-catalog — Stremio catalog addon over StreamFusion Reborn's cache.
+#   Catalog-only: reads reborn's Postgres `torrent_items` deduped by imdb_id,
+#   clean titles/years from the local IMDb DuckDB, posters from metahub.
+#   Catalogs: Films / Séries (recent + search) + Films 4K / Séries 4K.
+#   Needs a public HTTPS URL so Stremio can install it → published on the tunnel.
+name: reborn-catalog
+kind: python
+repo: /Users/haldir/src/reborn-catalog
+ref: main
+build_cmd: pip install -q -r requirements.txt
+start_cmd: exec python -m uvicorn app:app --host 127.0.0.1 --port 8791 --log-level warning
+port: 8791
+health_path: /manifest.json
+data_dir: reborn-catalog
+env:
+  RC_PG_HOST: 127.0.0.1
+  RC_PG_PORT: "5432"
+  RC_PG_DB: streamfusion
+  RC_PG_USER: streamfusion
+  RC_PG_PASS: ***REMOVED-CREDENTIAL***
+  RC_PORT: "8791"
+  RC_IMDB_DUCKDB: /Users/haldir/stream-fusion-reborn/data/imdb_db/imdb.duckdb
+  RC_MIN_SEEDERS: "1"
