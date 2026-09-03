@@ -138,6 +138,59 @@ def _localize_metadata(kind, tmdbid, title, overview, poster):
 PYEOF
 say "patch 4 (TMDB localisation) applied"
 
+# --- patch 5: byte-unique placeholder files ----------------------------
+# Every placeholder .mp4 is a hardlink/copy of ONE shared dummy -> byte
+# identical. Plex's scanner does content-hash "part rename detection" and
+# collapses all identical-hash files into a single library item (only the
+# last-scanned title survives). Force a copy + append a unique tail keyed
+# by the file path so each placeholder has a distinct hash. Trailing bytes
+# after the last MP4 atom are ignored by players and ffprobe.
+python3 - "${SRC}" <<'PYEOF'
+import sys, pathlib
+pf = pathlib.Path(sys.argv[1]) / "services/placeholders.py"
+s = pf.read_text(encoding="utf-8")
+MARK = "# patch_placeholdarr: byte-unique placeholder"
+if MARK not in s:
+    OLD = (
+        '    strategy = str(getattr(settings, "PLACEHOLDER_STRATEGY", "hardlink") or "hardlink").strip().lower()\n'
+        '    if strategy == "hardlink":\n'
+        '        try:\n'
+        '            os.link(dummy_path, path)\n'
+        '            os.utime(path, None)\n'
+        '            _ensure_open_permissions(path)\n'
+        '            return True\n'
+        '        except OSError:\n'
+        '            # Cross-device links can fail; copy is the safe fallback.\n'
+        '            shutil.copy2(dummy_path, path)\n'
+        '            os.utime(path, None)\n'
+        '            _ensure_open_permissions(path)\n'
+        '            return True\n'
+        '\n'
+        '    shutil.copy2(dummy_path, path)\n'
+        '    os.utime(path, None)\n'
+        '    _ensure_open_permissions(path)\n'
+        '    return True\n'
+    )
+    NEW = (
+        '    ' + MARK + ' (Plex hash-collision fix; hardlink strategy disabled)\n'
+        '    import hashlib as _hl\n'
+        '    shutil.copy2(dummy_path, path)\n'
+        '    try:\n'
+        '        with open(path, "ab") as _f:\n'
+        '            _f.write(b"\\x00\\x00PLHDR" + _hl.sha1(os.fsencode(path)).digest())\n'
+        '    except OSError:\n'
+        '        pass\n'
+        '    os.utime(path, None)\n'
+        '    _ensure_open_permissions(path)\n'
+        '    return True\n'
+    )
+    if OLD not in s:
+        raise SystemExit("patch_placeholdarr patch 5: ensure_placeholder_file tail not found - upstream changed")
+    pf.write_text(s.replace(OLD, NEW, 1), encoding="utf-8")
+    print(" * placeholders.py: placeholder files are now byte-unique")
+PYEOF
+say "patch 5 (byte-unique placeholders) applied"
+
 # --- seed appdata -------------------------------------------------------
 mkdir -p "${DATA}/config"
 for f in dummy.mp4 coming_soon_dummy.mp4; do
