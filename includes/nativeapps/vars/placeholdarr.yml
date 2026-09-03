@@ -1,0 +1,34 @@
+# Placeholdarr (github.com/TheIndieArmy/placeholdarr) — on-demand placeholder
+#   library for Plex/Jellyfin/Emby driven by Radarr/Sonarr. Python 3.12 FastAPI +
+#   React/Vite frontend (built → frontend/dist, served static by FastAPI).
+#   PostgreSQL 18 (native, role+db `placeholdarr`). Schema = main.py init_db()
+#   (NOT alembic — its history is broken; never run `alembic upgrade`).
+#   Two local patches re-applied by post_fetch (case-insensitive FS + /config).
+#   First run: open https://placeholdarr.jmiflix.fr and do the onboarding.
+name: placeholdarr
+kind: python
+repo: https://github.com/TheIndieArmy/placeholdarr.git
+ref: main-db
+post_fetch: patch_placeholdarr.sh
+build_cmd: export PATH="/opt/homebrew/opt/node@22/bin:$PATH" && (cd frontend && npm ci && npm run build) && pip install -q -r requirements.txt
+start_cmd: export PATH="/opt/homebrew/opt/postgresql@18/bin:$PATH" && until pg_isready -h localhost -p 5432 -q; do sleep 1; done && exec python main.py
+port: 8056
+health_path: /api/health
+data_dir: placeholdarr
+env:
+  OBJC_DISABLE_INITIALIZE_FORK_SAFETY: "YES"
+  no_proxy: "*"
+  PLACEHOLDARR_HOST: 127.0.0.1
+  PLACEHOLDARR_PORT: "8056"
+  APPDATA_PATH: __APP_DATA_DIR__/config
+  PLACEHOLDARR_SKIP_WEBHOOK_CHECK: "true"
+  DB_HOST: localhost
+  DB_PORT: "5432"
+  DB_USER: placeholdarr
+  DB_PASS: ***REMOVED-CREDENTIAL***
+  DB_NAME: placeholdarr
+  DUMMY_FILE_PATH: __APP_DATA_DIR__/config/dummy.mp4
+  COMING_SOON_DUMMY_FILE_PATH: __APP_DATA_DIR__/config/coming_soon_dummy.mp4
+  TAUTULLI_INSTANCE_KEY: tautulli
+  JELLYFIN_INSTANCE_KEY: jellyfin
+  EMBY_INSTANCE_KEY: emby
