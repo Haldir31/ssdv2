@@ -61,6 +61,83 @@ if grep -q 'root, "movies"' services/app_config.py 2>/dev/null; then
   say "services/app_config.py: movies/tv -> Films/Séries"
 fi
 
+# --- patch 4: localise placeholder .nfo + posters via TMDB --------------
+# New setting PLACEHOLDER_METADATA_LANGUAGE (BCP-47, e.g. fr-FR): when set +
+# TMDB_API_KEY present, re-fetch title/overview/poster from TMDB in that language
+# in sync_runner, so placeholders are localised whatever Radarr/Sonarr return.
+python3 - "${SRC}" <<'PYEOF'
+import sys, pathlib
+src = pathlib.Path(sys.argv[1])
+
+cfg = src / "core/config.py"
+c = cfg.read_text(encoding="utf-8")
+if "PLACEHOLDER_METADATA_LANGUAGE" not in c:
+    c = c.replace(
+        "    MOVIE_LIBRARY_4K_FOLDER: str = \"\"\n    TV_LIBRARY_4K_FOLDER: str = \"\"\n",
+        "    MOVIE_LIBRARY_4K_FOLDER: str = \"\"\n    TV_LIBRARY_4K_FOLDER: str = \"\"\n"
+        "    PLACEHOLDER_METADATA_LANGUAGE: str = \"\"\n", 1)
+    cfg.write_text(c, encoding="utf-8")
+    print(" * core/config.py: added PLACEHOLDER_METADATA_LANGUAGE")
+
+sr = src / "services/source_of_truth/sync_runner.py"
+s = sr.read_text(encoding="utf-8")
+if "_localize_metadata" not in s:
+    HELPER = '''
+_TMDB_LOC_CACHE: dict = {}
+
+
+def _localize_metadata(kind, tmdbid, title, overview, poster):
+    """TMDB re-fetch of title/overview/poster in PLACEHOLDER_METADATA_LANGUAGE.
+    No-op unless the setting + a TMDB key exist."""
+    lang = str(getattr(settings, "PLACEHOLDER_METADATA_LANGUAGE", "") or "").strip()
+    try:
+        tmdbid = int(tmdbid or 0)
+    except Exception:
+        tmdbid = 0
+    if not lang or tmdbid <= 0 or not getattr(settings, "TMDB_API_KEY", None):
+        return title, overview, poster
+    ck = (kind, tmdbid, lang)
+    data = _TMDB_LOC_CACHE.get(ck)
+    if data is None:
+        try:
+            from services import tmdb_client
+            path = f"/movie/{tmdbid}" if kind == "movie" else f"/tv/{tmdbid}"
+            data = tmdb_client._request(path, {"language": lang}) or {}
+        except Exception:
+            data = {}
+        _TMDB_LOC_CACHE[ck] = data
+    t = str(data.get("title") or data.get("name") or "").strip()
+    o = str(data.get("overview") or "").strip()
+    pp = str(data.get("poster_path") or "").strip()
+    return (t or title), (o or overview), (
+        f"https://image.tmdb.org/t/p/original{pp}" if pp else poster
+    )
+
+'''
+    s = s.replace("def _movie_fields(entry: Dict, is_4k: bool, instance_key: str) -> Dict:",
+                  HELPER + "\ndef _movie_fields(entry: Dict, is_4k: bool, instance_key: str) -> Dict:", 1)
+    s = s.replace(
+        "    instance_id, resolved_instance_key = _resolve_instance_identity('radarr', instance_key, is_4k)\n",
+        "    instance_id, resolved_instance_key = _resolve_instance_identity('radarr', instance_key, is_4k)\n"
+        "    title, _ph_ov, _ph_poster = _localize_metadata('movie', tmdbid, title, entry.get('overview'), _extract_poster_url(entry))\n", 1)
+    s = s.replace(
+        "        'remote_poster': _extract_poster_url(entry),\n        'remote_fanart': _extract_image_url(entry, ('fanart', 'background')),\n        'radarr_runtime':",
+        "        'remote_poster': _ph_poster,\n        'remote_fanart': _extract_image_url(entry, ('fanart', 'background')),\n        'radarr_runtime':", 1)
+    s = s.replace("        'radarr_overview': entry.get('overview'),\n", "        'radarr_overview': _ph_ov,\n", 1)
+    s = s.replace(
+        "    placeholder_folder = _placeholder_series_folder(entry, title=title, year=year, tvdbid=tvdbid, is_4k=is_4k)\n    return {",
+        "    placeholder_folder = _placeholder_series_folder(entry, title=title, year=year, tvdbid=tvdbid, is_4k=is_4k)\n"
+        "    title, _ph_ov, _ph_poster = _localize_metadata('tv', entry.get('tmdbId'), title, entry.get('overview'), _extract_poster_url(entry))\n    return {", 1)
+    s = s.replace("        'sonarr_series_overview': entry.get('overview'),\n", "        'sonarr_series_overview': _ph_ov,\n", 1)
+    s = s.replace(
+        "        'imdbid': entry.get('imdbId'),\n        'remote_poster': _extract_poster_url(entry),\n        'remote_fanart': _extract_image_url(entry, ('fanart', 'background')),\n        'remote_banner':",
+        "        'imdbid': entry.get('imdbId'),\n        'remote_poster': _ph_poster,\n        'remote_fanart': _extract_image_url(entry, ('fanart', 'background')),\n        'remote_banner':", 1)
+    import ast; ast.parse(s)
+    sr.write_text(s, encoding="utf-8")
+    print(" * sync_runner.py: added TMDB metadata localiser")
+PYEOF
+say "patch 4 (TMDB localisation) applied"
+
 # --- seed appdata -------------------------------------------------------
 mkdir -p "${DATA}/config"
 for f in dummy.mp4 coming_soon_dummy.mp4; do

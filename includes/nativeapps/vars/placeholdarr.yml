@@ -23,6 +23,8 @@ env:
   APPDATA_PATH: __APP_DATA_DIR__/config
   PLACEHOLDARR_SKIP_WEBHOOK_CHECK: "true"
   LIBRARY_ROOT: /Users/haldir/Medias
+  TMDB_API_KEY: ***REMOVED-CREDENTIAL***
+  PLACEHOLDER_METADATA_LANGUAGE: fr-FR
   DB_HOST: localhost
   DB_PORT: "5432"
   DB_USER: placeholdarr
