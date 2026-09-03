@@ -37,6 +37,48 @@ if "GetCircuitBreaker() == nil ||" not in g:
         "\t\tHealthy:         service.GetCircuitBreaker() == nil || !service.GetCircuitBreaker().IsOpen(),", 1)
     cg.write_text(g); print(" * curator.go handler nil-guarded")
 
+# --- patch 3: NIP-01 multi-value tag filter must be OR, not AND ---
+# storage_helpers.go appendTagFilters emits one `AND tags_json @> …` per value,
+# so `#l: [A,B,C]` requires the event to carry ALL of A,B,C. NIP-01 says a tag
+# filter's values are a logical OR. Breaks reborn's u2p_sync (9 `#l` categories
+# in one REQ -> 0 events from the Khatru relay). Wrap the per-value conditions
+# in ( … OR … ). Regex-based (whitespace-insensitive) on the default: case body.
+import re as _re
+sh_helpers = pathlib.Path("internal/relay/storage_helpers.go")
+h = sh_helpers.read_text()
+if "logical OR. (patch_u2p.sh)" not in h:
+    pat = _re.compile(
+        r"\t\tdefault:\n"
+        r"\t\t\tfor _, v := range values \{\n"
+        r"(?:.*\n)*?"                      # inner body (non-greedy)
+        r"\t\t\t\}\n"
+        r"\t\t\}\n"
+    )
+    NEW_TF = (
+        "\t\tdefault:\n"
+        "\t\t\t// NIP-01: a tag filter's values are a logical OR. (patch_u2p.sh)\n"
+        "\t\t\tors := make([]string, 0, len(values))\n"
+        "\t\t\tfor _, v := range values {\n"
+        "\t\t\t\tif isPostgres {\n"
+        "\t\t\t\t\tors = append(ors, \"tags_json @> ?::jsonb\")\n"
+        "\t\t\t\t\tcontainment, _ := json.Marshal([][]string{{tagName, v}})\n"
+        "\t\t\t\t\targs = append(args, string(containment))\n"
+        "\t\t\t\t} else {\n"
+        "\t\t\t\t\tors = append(ors, `tags_json LIKE ? ESCAPE '\\\\'`)\n"
+        "\t\t\t\t\targs = append(args, fmt.Sprintf(`%%[\"%s\",\"%s\"%%`, dbconn.EscapeLike(tagName), dbconn.EscapeLike(v)))\n"
+        "\t\t\t\t}\n"
+        "\t\t\t}\n"
+        "\t\t\tif len(ors) > 0 {\n"
+        "\t\t\t\tquery += \" AND (\" + strings.Join(ors, \" OR \") + \")\"\n"
+        "\t\t\t}\n"
+        "\t\t}\n"
+    )
+    h2, n = pat.subn(NEW_TF, h, count=1)
+    if n != 1:
+        raise SystemExit("patch_u2p patch 3: appendTagFilters default case not found - upstream changed")
+    sh_helpers.write_text(h2)
+    print(" * storage_helpers.go: multi-value tag filter -> OR")
+
 # --- patch 2: curator-disabled -> ShouldIndex passthrough (not fail-closed) ---
 ci = pathlib.Path("internal/indexer/curator_integration.go")
 t = ci.read_text()
