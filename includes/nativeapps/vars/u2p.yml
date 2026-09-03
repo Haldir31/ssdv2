@@ -16,7 +16,7 @@ name: u2p
 kind: go
 repo: https://git.u2p.network/u2p/u2p-node.git
 ref: main
-build_cmd: cd web && pnpm install && pnpm run build && cd .. && rm -rf internal/api/static && cp -r web/build internal/api/static && CGO_ENABLED=0 go build -trimpath -ldflags "-w -s" -o u2p ./cmd/athanor
+build_cmd: cd web && pnpm install && pnpm run build && cd .. && rm -rf internal/api/static && cp -r web/build internal/api/static && CGO_ENABLED=0 go build -trimpath -ldflags "-w -s -X athanor/internal/buildmeta.Version=main-$(git rev-parse --short HEAD) -X athanor/internal/buildmeta.Commit=$(git rev-parse --short HEAD) -X athanor/internal/buildmeta.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ) -X athanor/internal/buildmeta.CuratorCommit=$(git rev-parse --short HEAD:curator 2>/dev/null || echo unknown)" -o u2p ./cmd/athanor
 start_cmd: ./u2p
 port: 9999
 health_path: /
