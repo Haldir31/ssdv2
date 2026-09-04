@@ -232,5 +232,59 @@ if "doc.ID = int64(r.ID)" not in a and "doc.ID = r.ID" not in a:
     if "doc.ID" not in a:
         raise SystemExit("patch_u2p patch 5: meili_adapters.go doc build sites not found - upstream changed")
     ma.write_text(a); print(" * meili_adapters.go: carry Postgres id into the doc")
+
+# --- patch 6: quality filter for the Meili search backend ---
+# SearchParams.Quality is applied only in the SQL path (name LIKE '%tag%');
+# buildMeiliFilter ignores it, so ?quality=REMUX is silently dropped whenever
+# Meili is the active backend. Mirror the SQL behaviour: append each quality
+# token as an exact phrase to the query and require every term to match.
+gw = pathlib.Path("internal/meili/gateway.go")
+g2 = gw.read_text()
+if "no dedicated document field" not in g2:
+    OLD_G = ("\tfilter := buildMeiliFilter(params, trust)\n"
+             "\tsortExprs := buildMeiliSort(params)\n\n"
+             "\tlimit := params.Limit\n"
+             "\tif limit <= 0 {\n\t\tlimit = 50\n\t}\n\n"
+             "\t// Request limit+1 to detect has_more without a separate count query.\n"
+             "\treq := &meilisearch.SearchRequest{\n"
+             "\t\tFilter:               filter,\n"
+             "\t\tSort:                 sortExprs,\n"
+             "\t\tOffset:               int64(params.Offset),\n"
+             "\t\tLimit:                int64(limit + 1),\n"
+             "\t\tAttributesToSearchOn: []string{\"name\", \"title\", \"overview\", \"genres\", \"info_hash\"},\n"
+             "\t}\n\n"
+             "\tidx := g.client.Index()\n"
+             "\tresp, err := idx.SearchWithContext(ctx, params.Query, req)\n")
+    NEW_G = ("\tfilter := buildMeiliFilter(params, trust)\n"
+             "\tsortExprs := buildMeiliSort(params)\n\n"
+             "\tlimit := params.Limit\n"
+             "\tif limit <= 0 {\n\t\tlimit = 50\n\t}\n\n"
+             "\t// Quality has no dedicated document field; the SQL path does name LIKE\n"
+             "\t// '%tag%'. Mirror it: append each quality token as an exact phrase and\n"
+             "\t// require every term to match.\n"
+             "\tquery := params.Query\n"
+             "\tvar matchStrategy meilisearch.MatchingStrategy\n"
+             "\tif params.Quality != \"\" {\n"
+             "\t\tfor _, tag := range strings.Split(params.Quality, \",\") {\n"
+             "\t\t\tif tag = strings.TrimSpace(tag); tag != \"\" {\n"
+             "\t\t\t\tquery = strings.TrimSpace(query + ` \"` + strings.ReplaceAll(tag, `\"`, \"\") + `\"`)\n"
+             "\t\t\t}\n"
+             "\t\t}\n"
+             "\t\tmatchStrategy = meilisearch.All\n"
+             "\t}\n\n"
+             "\t// Request limit+1 to detect has_more without a separate count query.\n"
+             "\treq := &meilisearch.SearchRequest{\n"
+             "\t\tFilter:               filter,\n"
+             "\t\tSort:                 sortExprs,\n"
+             "\t\tOffset:               int64(params.Offset),\n"
+             "\t\tLimit:                int64(limit + 1),\n"
+             "\t\tMatchingStrategy:     matchStrategy,\n"
+             "\t\tAttributesToSearchOn: []string{\"name\", \"title\", \"overview\", \"genres\", \"info_hash\"},\n"
+             "\t}\n\n"
+             "\tidx := g.client.Index()\n"
+             "\tresp, err := idx.SearchWithContext(ctx, query, req)\n")
+    if OLD_G not in g2:
+        raise SystemExit("patch_u2p patch 6: gateway.go searchMeili req block not found - upstream changed")
+    gw.write_text(g2.replace(OLD_G, NEW_G, 1)); print(" * gateway.go: quality filter on the Meili backend")
 PYEOF
 echo -e " ${GREEN}* [patch_u2p] curator crash-loop guard applied${NC}"
