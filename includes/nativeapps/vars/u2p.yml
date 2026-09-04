@@ -53,3 +53,9 @@ env:
   ATHANOR_ACTIVE_SET_SYNC_BUDGET_MB_PER_HOUR: "8000"
   ATHANOR_RELAY_SYNC_MAX_EVENTS_PER_RELAY: "200000"
   ATHANOR_INDEXER_MAX_CONCURRENT_SYNCS: "20"
+  # httprate LimitByIP keys on RemoteAddr (chi.RealIP is intentionally absent), so
+  # behind the CF tunnel + Traefik every user shares one IP -> ip_per_minute is a
+  # GLOBAL request cap. The default 1000 made the SvelteKit dashboard (polling
+  # tiers 3/10/30/60s across many widgets + tabs) throw "Too Many Requests".
+  ATHANOR_OPERATIONAL_RATE_LIMITS_IP_PER_MINUTE: "20000"
+  ATHANOR_OPERATIONAL_RATE_LIMITS_API_KEY_PER_MINUTE: "20000"
