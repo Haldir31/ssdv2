@@ -368,6 +368,107 @@ if "_extract_series_title" not in s:
 PYEOF
 say "patch 6 (episode series-title fallback) applied"
 
+# --- patch 7: French episode titles/overviews + genres -------------------
+# patch 4's _localize_metadata only re-fetches series/movie title+overview+poster
+# from TMDB. Episode titles/overviews came straight from Sonarr (English, no
+# metadata-language option), and genres were never localised. Add a per-episode
+# TMDB re-fetch (_localize_episode) and make _localize_metadata also return
+# localised genres.
+python3 - "${SRC}" <<'PYEOF'
+import sys, pathlib, ast
+sr = pathlib.Path(sys.argv[1]) / "services/source_of_truth/sync_runner.py"
+s = sr.read_text(encoding="utf-8")
+if "_localize_episode" not in s:
+    s = s.replace(
+        "def _localize_metadata(kind, tmdbid, title, overview, poster):",
+        "def _localize_metadata(kind, tmdbid, title, overview, poster, genres=None):", 1)
+    s = s.replace(
+        "    if not lang or tmdbid <= 0 or not getattr(settings, \"TMDB_API_KEY\", None):\n"
+        "        return title, overview, poster\n",
+        "    if not lang or tmdbid <= 0 or not getattr(settings, \"TMDB_API_KEY\", None):\n"
+        "        return title, overview, poster, genres\n", 1)
+    s = s.replace(
+        "    pp = str(data.get(\"poster_path\") or \"\").strip()\n"
+        "    return (t or title), (o or overview), (\n"
+        "        f\"https://image.tmdb.org/t/p/original{pp}\" if pp else poster\n"
+        "    )\n",
+        "    pp = str(data.get(\"poster_path\") or \"\").strip()\n"
+        "    g = [x.get(\"name\") for x in (data.get(\"genres\") or []) if isinstance(x, dict) and x.get(\"name\")]\n"
+        "    return (t or title), (o or overview), (\n"
+        "        f\"https://image.tmdb.org/t/p/original{pp}\" if pp else poster\n"
+        "    ), (g or genres)\n\n\n"
+        "_TMDB_EP_LOC_CACHE: dict = {}\n\n\n"
+        "def _localize_episode(series_tmdbid, season_num, ep_num, title, overview):\n"
+        "    \"\"\"TMDB re-fetch of an episode's name + overview in PLACEHOLDER_METADATA_LANGUAGE.\"\"\"\n"
+        "    lang = str(getattr(settings, \"PLACEHOLDER_METADATA_LANGUAGE\", \"\") or \"\").strip()\n"
+        "    try:\n"
+        "        series_tmdbid = int(series_tmdbid or 0)\n"
+        "        season_num = int(season_num)\n"
+        "        ep_num = int(ep_num or 0)\n"
+        "    except Exception:\n"
+        "        return title, overview\n"
+        "    if (not lang or series_tmdbid <= 0 or season_num < 0 or ep_num <= 0\n"
+        "            or not getattr(settings, \"TMDB_API_KEY\", None)):\n"
+        "        return title, overview\n"
+        "    ck = (series_tmdbid, season_num, ep_num, lang)\n"
+        "    data = _TMDB_EP_LOC_CACHE.get(ck)\n"
+        "    if data is None:\n"
+        "        try:\n"
+        "            from services import tmdb_client\n"
+        "            data = tmdb_client._request(\n"
+        "                f\"/tv/{series_tmdbid}/season/{season_num}/episode/{ep_num}\",\n"
+        "                {\"language\": lang},\n"
+        "            ) or {}\n"
+        "        except Exception:\n"
+        "            data = {}\n"
+        "        _TMDB_EP_LOC_CACHE[ck] = data\n"
+        "    t = str(data.get(\"name\") or \"\").strip()\n"
+        "    o = str(data.get(\"overview\") or \"\").strip()\n"
+        "    return (t or title), (o or overview)\n", 1)
+    # movie call site
+    s = s.replace(
+        "    title, _ph_ov, _ph_poster = _localize_metadata('movie', tmdbid, title, entry.get('overview'), _extract_poster_url(entry))",
+        "    title, _ph_ov, _ph_poster, _ph_genres = _localize_metadata('movie', tmdbid, title, entry.get('overview'), _extract_poster_url(entry), entry.get('genres') if isinstance(entry.get('genres'), list) else None)", 1)
+    s = s.replace(
+        "        'radarr_genres': entry.get('genres') if isinstance(entry.get('genres'), list) else None,",
+        "        'radarr_genres': _ph_genres,", 1)
+    # series call site
+    s = s.replace(
+        "    title, _ph_ov, _ph_poster = _localize_metadata('tv', entry.get('tmdbId'), title, entry.get('overview'), _extract_poster_url(entry))",
+        "    title, _ph_ov, _ph_poster, _ph_genres = _localize_metadata('tv', entry.get('tmdbId'), title, entry.get('overview'), _extract_poster_url(entry), entry.get('genres') if isinstance(entry.get('genres'), list) else None)", 1)
+    s = s.replace(
+        "        'sonarr_genres': entry.get('genres') if isinstance(entry.get('genres'), list) else None,",
+        "        'sonarr_genres': _ph_genres,", 1)
+    # episode fields
+    s = s.replace(
+        "    episode_sonarrpath = os.path.dirname(sonarr_filepath) if sonarr_filepath else season_folder\n"
+        "    return {\n"
+        "        'season_id': season.id,\n"
+        "        'episode_number': int(entry.get('episodeNumber') or 0),\n"
+        "        'title': entry.get('title') or f\"Episode {int(entry.get('episodeNumber') or 0)}\",\n",
+        "    episode_sonarrpath = os.path.dirname(sonarr_filepath) if sonarr_filepath else season_folder\n"
+        "    _ep_title, _ep_ov = _localize_episode(\n"
+        "        getattr(series, 'sonarr_tmdbid', None),\n"
+        "        getattr(season, 'season_number', None),\n"
+        "        entry.get('episodeNumber'),\n"
+        "        entry.get('title'),\n"
+        "        entry.get('overview'),\n"
+        "    )\n"
+        "    return {\n"
+        "        'season_id': season.id,\n"
+        "        'episode_number': int(entry.get('episodeNumber') or 0),\n"
+        "        'title': _ep_title or f\"Episode {int(entry.get('episodeNumber') or 0)}\",\n", 1)
+    s = s.replace(
+        "        'sonarr_episode_overview': entry.get('overview'),",
+        "        'sonarr_episode_overview': _ep_ov,", 1)
+    if s.count("_ph_genres") < 4 or "_localize_episode(" not in s or "'sonarr_episode_overview': _ep_ov," not in s:
+        raise SystemExit("patch_placeholdarr patch 7: sync_runner.py call sites not all found - upstream changed")
+    ast.parse(s)
+    sr.write_text(s, encoding="utf-8")
+    print(" * sync_runner.py: FR episode titles/overviews + localised genres")
+PYEOF
+say "patch 7 (French episodes + genres) applied"
+
 # --- seed appdata -------------------------------------------------------
 mkdir -p "${DATA}/config"
 for f in dummy.mp4 coming_soon_dummy.mp4; do
