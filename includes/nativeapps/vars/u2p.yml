@@ -46,3 +46,10 @@ env:
   ATHANOR_MEILISEARCH_URL: http://127.0.0.1:7700
   ATHANOR_MEILISEARCH_API_KEY: ***REMOVED-CREDENTIAL***
   ATHANOR_MEILISEARCH_INDEX_NAME: athanor_torrents
+  # Sync throughput tuning (defaults 100 MB/h + 1000 events/relay + 3 concurrent
+  # are far too low to pull a large single-relay catalogue like the YGG-FR mirror).
+  # DO NOT set ATHANOR_DISCOVERY_ENABLED=false — it hangs athanor's startup
+  # (active-set manager depends on the discovery subsystem).
+  ATHANOR_ACTIVE_SET_SYNC_BUDGET_MB_PER_HOUR: "8000"
+  ATHANOR_RELAY_SYNC_MAX_EVENTS_PER_RELAY: "200000"
+  ATHANOR_INDEXER_MAX_CONCURRENT_SYNCS: "20"
