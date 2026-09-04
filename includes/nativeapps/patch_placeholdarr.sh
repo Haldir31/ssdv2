@@ -469,6 +469,61 @@ if "_localize_episode" not in s:
 PYEOF
 say "patch 7 (French episodes + genres) applied"
 
+# --- patch 8: episode still in NFO + plain .jpg sidecar ------------------
+# Placeholder episodes showed a grey frame from the dummy .mp4 instead of a
+# still. The episode NFO carried no <thumb>, and the still sidecar was only
+# written as <basename>-thumb.jpg (Kodi convention). Emit <thumb>URL</thumb>
+# and also copy the still to <basename>.jpg (Plex/Jellyfin convention).
+# (Plex's own tv.plex.agents.nfo.series still ignores both for episodes — this
+#  helps Jellyfin/Emby + a direct API push if one is added later.)
+python3 - "${SRC}" <<'PYEOF'
+import sys, pathlib
+src = pathlib.Path(sys.argv[1])
+pl = src / "services/placeholders.py"
+p = pl.read_text(encoding="utf-8")
+if '<thumb>{escape(_ep_still)}</thumb>' not in p:
+    OLD = ("        lines.append(f\"  <plot>{plot}</plot>\")\n"
+           "    else:\n"
+           "        lines.append(f\"  <plot>{escape(project_summary('', status, runtime_minutes=rm, media_context=media_ctx))}</plot>\")\n"
+           "    if tvdbid:\n")
+    NEW = ("        lines.append(f\"  <plot>{plot}</plot>\")\n"
+           "    else:\n"
+           "        lines.append(f\"  <plot>{escape(project_summary('', status, runtime_minutes=rm, media_context=media_ctx))}</plot>\")\n"
+           "    _ep_still = str(getattr(episode, \"sonarr_episode_still\", \"\") or \"\").strip()\n"
+           "    if _ep_still:\n"
+           "        lines.append(f\"  <thumb>{escape(_ep_still)}</thumb>\")\n"
+           "    if tvdbid:\n")
+    if OLD not in p:
+        raise SystemExit("patch_placeholdarr patch 8: _episode_nfo_xml plot block not found - upstream changed")
+    pl.write_text(p.replace(OLD, NEW, 1), encoding="utf-8")
+    print(" * placeholders.py: episode NFO <thumb>")
+
+pa = src / "services/placeholder_poster_art.py"
+a = pa.read_text(encoding="utf-8")
+if "Plex/Kodi/Jellyfin\n" not in a and '_plain = os.path.splitext' not in a:
+    OLD_A = ("        result.local_art.thumb = thumb_name\n"
+             "        result.wrote_any = True\n"
+             "        result.art_counts[\"episode\"] = 1\n"
+             "    return result\n")
+    NEW_A = ("        result.local_art.thumb = thumb_name\n"
+             "        result.wrote_any = True\n"
+             "        result.art_counts[\"episode\"] = 1\n"
+             "        try:\n"
+             "            _plain = os.path.splitext(os.path.basename(media_path))[0] + \".jpg\"\n"
+             "            _plain_path = os.path.join(folder, _plain)\n"
+             "            if os.path.isfile(thumb_path):\n"
+             "                import shutil as _sh\n"
+             "                _sh.copyfile(thumb_path, _plain_path)\n"
+             "        except OSError:\n"
+             "            pass\n"
+             "    return result\n")
+    if OLD_A not in a:
+        raise SystemExit("patch_placeholdarr patch 8: ensure_episode_still_art tail not found - upstream changed")
+    pa.write_text(a.replace(OLD_A, NEW_A, 1), encoding="utf-8")
+    print(" * placeholder_poster_art.py: <basename>.jpg episode still sidecar")
+PYEOF
+say "patch 8 (episode still nfo/jpg) applied"
+
 # --- seed appdata -------------------------------------------------------
 mkdir -p "${DATA}/config"
 for f in dummy.mp4 coming_soon_dummy.mp4; do
