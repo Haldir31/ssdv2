@@ -286,5 +286,81 @@ if "no dedicated document field" not in g2:
     if OLD_G not in g2:
         raise SystemExit("patch_u2p patch 6: gateway.go searchMeili req block not found - upstream changed")
     gw.write_text(g2.replace(OLD_G, NEW_G, 1)); print(" * gateway.go: quality filter on the Meili backend")
+
+# --- patch 7: FR-only content filter in CuratorGate.ShouldIndex ---
+# NIP-35 (kind:2003) has no language field, and the active-set auto-syncs
+# every relay that passes behavioral validation regardless of what content it
+# carries -> the catalogue was measurably contaminated with non-FR releases
+# (GERMAN/ITALIAN/etc titles) within hours of enabling active_set. This is a
+# content-level filter independent of relay source and of curator.enabled:
+# reject only when a title carries an explicit non-FR-only language marker
+# AND no French marker (dual-audio/MULTi releases legitimately carry both;
+# untagged content — books, French-original music/TV — is left alone rather
+# than risk over-blocking it).
+ci2 = pathlib.Path("internal/indexer/curator_integration.go")
+t2 = ci2.read_text()
+if "isNonFrenchContent" not in t2:
+    OLD_IMPORT = ('import (\n'
+                  '\t"context"\n'
+                  '\t"encoding/json"\n'
+                  '\t"fmt"\n'
+                  '\n'
+                  '\t"athanor/internal/curator"\n')
+    NEW_IMPORT = ('import (\n'
+                  '\t"context"\n'
+                  '\t"encoding/json"\n'
+                  '\t"fmt"\n'
+                  '\t"regexp"\n'
+                  '\n'
+                  '\t"athanor/internal/curator"\n')
+    if OLD_IMPORT not in t2:
+        raise SystemExit("patch_u2p patch 7: curator_integration.go import block not found - upstream changed")
+    t2 = t2.replace(OLD_IMPORT, NEW_IMPORT, 1)
+
+    OLD_TRACE_IMPORT_END = ('\t"go.opentelemetry.io/otel/trace"\n'
+                             ')\n')
+    NEW_FILTER_DEF = ('\t"go.opentelemetry.io/otel/trace"\n'
+                       ')\n\n'
+                       '// FR-only content filter (patch_u2p.sh) — independent of the curator\n'
+                       '// microservice and of which relay the event came from. NIP-35 has no\n'
+                       '// language field, so title markers are the only available signal. A release\n'
+                       '// is rejected only when it carries an explicit non-FR-only language marker\n'
+                       '// AND no French marker (dual-audio/MULTi releases legitimately carry both,\n'
+                       '// and untagged content — books, French-original music/TV — is left alone\n'
+                       '// rather than risk over-blocking it).\n'
+                       'var (\n'
+                       '\tfrAllowMarkerRe = regexp.MustCompile(`(?i)\\b(french|vostfr|multi|vf2?|vff|vfq|vfi|truefrench)\\b`)\n'
+                       '\tfrBlockMarkerRe = regexp.MustCompile(`(?i)\\b(german|italian|spanish|russian|polish|japanese|korean|hindi|dutch|swedish|portuguese|danish|norwegian|finnish|greek|turkish|arabic|chinese|thai)\\b`)\n'
+                       ')\n\n'
+                       '// isNonFrenchContent reports whether event.Name carries an explicit non-FR\n'
+                       '// language marker with no accompanying French marker.\n'
+                       'func isNonFrenchContent(event *nostr.TorrentEvent) bool {\n'
+                       '\tif frAllowMarkerRe.MatchString(event.Name) {\n'
+                       '\t\treturn false\n'
+                       '\t}\n'
+                       '\treturn frBlockMarkerRe.MatchString(event.Name)\n'
+                       '}\n')
+    if OLD_TRACE_IMPORT_END not in t2:
+        raise SystemExit("patch_u2p patch 7: curator_integration.go trace import end not found - upstream changed")
+    t2 = t2.replace(OLD_TRACE_IMPORT_END, NEW_FILTER_DEF, 1)
+
+    OLD_SHOULDINDEX = ('\tspan.SetAttributes(attribute.String("torrent.infohash", event.InfoHash))\n'
+                        '\n'
+                        '\t// Curator disabled -> passthrough. Upstream trust/blacklist/tag gates\n')
+    NEW_SHOULDINDEX = ('\tspan.SetAttributes(attribute.String("torrent.infohash", event.InfoHash))\n'
+                        '\n'
+                        '\t// FR-only content filter (patch_u2p.sh) — applies regardless of curator\n'
+                        '\t// state or source relay. See isNonFrenchContent.\n'
+                        '\tif isNonFrenchContent(event) {\n'
+                        '\t\tspan.SetStatus(codes.Ok, "rejected: non-FR language marker in title")\n'
+                        '\t\treturn false, "content filter: non-FR language marker, no FR marker present"\n'
+                        '\t}\n'
+                        '\n'
+                        '\t// Curator disabled -> passthrough. Upstream trust/blacklist/tag gates\n')
+    if OLD_SHOULDINDEX not in t2:
+        raise SystemExit("patch_u2p patch 7: curator_integration.go ShouldIndex start not found - upstream changed")
+    t2 = t2.replace(OLD_SHOULDINDEX, NEW_SHOULDINDEX, 1)
+
+    ci2.write_text(t2); print(" * curator_integration.go: FR-only content filter (title marker)")
 PYEOF
 echo -e " ${GREEN}* [patch_u2p] curator crash-loop guard applied${NC}"

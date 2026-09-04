@@ -51,10 +51,19 @@ env:
   ATHANOR_MEILISEARCH_URL: http://127.0.0.1:7700
   ATHANOR_MEILISEARCH_API_KEY: __SECRET__
   ATHANOR_MEILISEARCH_INDEX_NAME: athanor_torrents
+  # FR-only lockdown (2026-09-04): active_set auto-syncs EVERY relay that
+  # passes behavioral validation, regardless of content — it grew from the 1
+  # pinned FR relay to ~940 auto-created sync configs across ~5000 relays in
+  # about a day, measurably importing non-FR releases. pinned_relays does not
+  # exclude other relays (it only protects a relay from rotation), so the only
+  # real lock is disabling the active-set manager entirely and managing
+  # nip77_sync_configs by hand (only the FR relay's config stays enabled).
+  # DO NOT set ATHANOR_DISCOVERY_ENABLED=false — it hangs athanor's startup
+  # (active-set manager depends on the discovery subsystem) — discovery can
+  # stay on even with the active-set itself disabled below.
+  ATHANOR_ACTIVE_SET_ENABLED: "false"
   # Sync throughput tuning (defaults 100 MB/h + 1000 events/relay + 3 concurrent
   # are far too low to pull a large single-relay catalogue like the YGG-FR mirror).
-  # DO NOT set ATHANOR_DISCOVERY_ENABLED=false — it hangs athanor's startup
-  # (active-set manager depends on the discovery subsystem).
   ATHANOR_ACTIVE_SET_SYNC_BUDGET_MB_PER_HOUR: "8000"
   ATHANOR_RELAY_SYNC_MAX_EVENTS_PER_RELAY: "200000"
   ATHANOR_INDEXER_MAX_CONCURRENT_SYNCS: "20"
