@@ -156,5 +156,81 @@ if "hydrate the Postgres id from info_hash" not in z:
     if OLD_S not in z:
         raise SystemExit("patch_u2p patch 4: Search handler response block not found - upstream changed")
     sh.write_text(z.replace(OLD_S, NEW_S, 1)); print(" * search.go: hydrate id on meili results")
+
+# --- patch 5: Meili full-reindex was stuck (id in the index + keyset cursor) ---
+# (a) TorrentDocument had no numeric id -> search hits are id=0.
+# (b) bulk.FullSync keyset-paginates (WHERE id > cursor) but advanced the cursor
+#     by ROW COUNT (500,1000,...) not the last row's id. Torrent ids start well
+#     above 5000 after a purge, so every batch after the first refetched the same
+#     first 500 rows -> the index froze at 500 docs.
+mt = pathlib.Path("internal/meili/types.go")
+m = mt.read_text()
+if 'ID int64 `json:"id"`' not in m:
+    m = m.replace(
+        "\t// InfoHash is the unique identifier (primary key) for this torrent in Meilisearch.\n\tInfoHash string `json:\"info_hash\"`\n",
+        "\t// InfoHash is the unique identifier (primary key) for this torrent in Meilisearch.\n\tInfoHash string `json:\"info_hash\"`\n\t// ID is the Postgres row id, carried so search hits can link to /torrent/{id}.\n\tID int64 `json:\"id\"`\n", 1)
+    mt.write_text(m); print(" * meili/types.go: TorrentDocument.ID")
+
+mc = pathlib.Path("internal/meili/client.go")
+c = mc.read_text()
+if "func (c *Client) BulkUpsert" not in c:
+    c = c.replace(
+        "func (c *Client) Index() meilisearch.IndexManager {\n\treturn c.inner.Index(c.cfg.IndexName)\n}\n",
+        "func (c *Client) Index() meilisearch.IndexManager {\n\treturn c.inner.Index(c.cfg.IndexName)\n}\n\n"
+        "// BulkUpsert writes documents straight to the index in one request, bypassing\n"
+        "// the real-time sync channel (which drops on a full buffer during a full reindex).\n"
+        "func (c *Client) BulkUpsert(ctx context.Context, docs []TorrentDocument) error {\n"
+        "\tif len(docs) == 0 {\n\t\treturn nil\n\t}\n"
+        "\tprimaryKey := \"info_hash\"\n"
+        "\t_, err := c.inner.Index(c.cfg.IndexName).UpdateDocumentsWithContext(ctx, docs, &meilisearch.DocumentOptions{\n"
+        "\t\tPrimaryKey: &primaryKey,\n\t})\n\treturn err\n}\n", 1)
+    mc.write_text(c); print(" * meili/client.go: BulkUpsert")
+
+mq = pathlib.Path("internal/meili/query.go")
+qf = mq.read_text()
+if 'sr.ID = int64Field(hit, "id")' not in qf:
+    qf = qf.replace("\tvar sr torrent.SearchResult\n\n\tsr.InfoHash = stringField(hit, \"info_hash\")\n",
+                    "\tvar sr torrent.SearchResult\n\n\tsr.ID = int64Field(hit, \"id\")\n\tsr.InfoHash = stringField(hit, \"info_hash\")\n", 1)
+    mq.write_text(qf); print(" * meili/query.go: mapHit reads id")
+
+mb = pathlib.Path("internal/meili/bulk.go")
+bk = mb.read_text()
+if "cursorID := 0" not in bk:
+    OLD_B = ("\toffset := 0\n\ttotalSynced := int64(0)\n\n\tfor {\n"
+             "\t\tdocs, total, err := b.loader.LoadAllTorrents(ctx, offset, batchSize)\n"
+             "\t\tif err != nil {\n\t\t\treturn fmt.Errorf(\"load torrents at offset %d: %w\", offset, err)\n\t\t}\n"
+             "\t\tif len(docs) == 0 {\n\t\t\tbreak\n\t\t}\n\n"
+             "\t\tfor i := range docs {\n\t\t\tb.syncer.EnqueueUpsert(&docs[i])\n\t\t}\n"
+             "\t\ttotalSynced += int64(len(docs))\n")
+    if OLD_B in bk:
+        bk = bk.replace(OLD_B,
+             "\tcursorID := 0\n\ttotalSynced := int64(0)\n\n\tfor {\n"
+             "\t\tdocs, total, err := b.loader.LoadAllTorrents(ctx, cursorID, batchSize)\n"
+             "\t\tif err != nil {\n\t\t\treturn fmt.Errorf(\"load torrents after id %d: %w\", cursorID, err)\n\t\t}\n"
+             "\t\tif len(docs) == 0 {\n\t\t\tbreak\n\t\t}\n\n"
+             "\t\tif err := b.client.BulkUpsert(ctx, docs); err != nil {\n\t\t\treturn fmt.Errorf(\"bulk upsert after id %d: %w\", cursorID, err)\n\t\t}\n"
+             "\t\ttotalSynced += int64(len(docs))\n", 1)
+    OLD_B2 = ("\t\toffset += len(docs)\n\t\tif int64(offset) >= total {\n\t\t\tbreak\n\t\t}\n")
+    if OLD_B2 in bk:
+        bk = bk.replace(OLD_B2,
+             "\t\tcursorID = int(docs[len(docs)-1].ID)\n\t\tif len(docs) < batchSize {\n\t\t\tbreak\n\t\t}\n", 1)
+    if "cursorID := 0" not in bk or "cursorID = int(docs[len(docs)-1].ID)" not in bk:
+        raise SystemExit("patch_u2p patch 5: bulk.go FullSync loop not found - upstream changed")
+    mb.write_text(bk); print(" * meili/bulk.go: keyset cursor + direct BulkUpsert")
+
+ma = pathlib.Path("internal/app/meili_adapters.go")
+a = ma.read_text()
+if "doc.ID = int64(r.ID)" not in a and "doc.ID = r.ID" not in a:
+    # pgx branches: doc built by mapPgxRowToMeiliDoc(...); insert doc.ID before the pubkeys line
+    a = a.replace(
+        "\t\t\t\tr.MagnetUri, r.LatestDecisionStatus, derefStr(r.PosterUrl))\n\t\t\tpubkeys, _ := q.GetUploaderPubkeysByInfoHash(ctx, r.InfoHash)\n",
+        "\t\t\t\tr.MagnetUri, r.LatestDecisionStatus, derefStr(r.PosterUrl))\n\t\t\tdoc.ID = int64(r.ID)\n\t\t\tpubkeys, _ := q.GetUploaderPubkeysByInfoHash(ctx, r.InfoHash)\n")
+    # sqlite branches: doc built by mapSqliteRowToMeiliDoc(...); r.ID is int64
+    a = a.replace(
+        "\t\t\t\tfirstSeenAt, updatedAt, r.LatestDecisionStatus)\n\t\t\tpubkeys, _ := q.GetUploaderPubkeysByInfoHash(ctx, r.InfoHash)\n",
+        "\t\t\t\tfirstSeenAt, updatedAt, r.LatestDecisionStatus)\n\t\t\tdoc.ID = r.ID\n\t\t\tpubkeys, _ := q.GetUploaderPubkeysByInfoHash(ctx, r.InfoHash)\n")
+    if "doc.ID" not in a:
+        raise SystemExit("patch_u2p patch 5: meili_adapters.go doc build sites not found - upstream changed")
+    ma.write_text(a); print(" * meili_adapters.go: carry Postgres id into the doc")
 PYEOF
 echo -e " ${GREEN}* [patch_u2p] curator crash-loop guard applied${NC}"
