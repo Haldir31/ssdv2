@@ -40,6 +40,11 @@ env:
   ATHANOR_DATABASE_POSTGRES_PASSWORD: ***REMOVED-CREDENTIAL***
   ATHANOR_DATABASE_POSTGRES_SSLMODE: disable
   ATHANOR_CURATOR_ENABLED: "false"
+  # Dashboard login (server.admin_username / server.admin_password). Default is
+  # admin/admin and config.yaml reverts on every reinstall, so pin it here.
+  # Set BOTH to "-" to disable auth entirely.
+  ATHANOR_SERVER_ADMIN_USERNAME: "haldir"
+  ATHANOR_SERVER_ADMIN_PASSWORD: "***REMOVED-CREDENTIAL***"
   # Meili ON so the Settings page loads (it hard-fails on a 503 from /meili/status).
   # OWN index name — NOT reborn's "torrents" index (native com.haldir.meilisearch).
   ATHANOR_MEILISEARCH_ENABLED: "true"
