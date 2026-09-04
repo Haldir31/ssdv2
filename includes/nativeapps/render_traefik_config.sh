@@ -174,7 +174,21 @@ echo " * dynamic config -> ${DYN_DIR}/apps.yml"
 # config). Credentials come from SSD_TRAEFIK_DASHBOARD_AUTH ("user:password"),
 # hashed here with bcrypt (htpasswd) — fallback to openssl apr1-MD5, both
 # understood by Traefik's basicAuth.
-DASH_AUTH="${SSD_TRAEFIK_DASHBOARD_AUTH:-haldir:***REMOVED-CREDENTIAL***}"
+# Credentials: env SSD_TRAEFIK_DASHBOARD_AUTH, else DASHBOARD_AUTH= in
+# ${SSD_SECRETS_DIR:-~/.config/ssd/native-secrets}/traefik.env (not in git),
+# else a random one is generated and persisted there.
+DASH_AUTH="${SSD_TRAEFIK_DASHBOARD_AUTH:-}"
+_TRAEFIK_SECRETS_DIR="${SSD_SECRETS_DIR:-${HOME}/.config/ssd/native-secrets}"
+_TRAEFIK_SECRETS_FILE="${_TRAEFIK_SECRETS_DIR}/traefik.env"
+if [ -z "${DASH_AUTH}" ] && [ -f "${_TRAEFIK_SECRETS_FILE}" ]; then
+  DASH_AUTH="$(sed -n 's/^DASHBOARD_AUTH=//p' "${_TRAEFIK_SECRETS_FILE}" | head -1)"
+fi
+if [ -z "${DASH_AUTH}" ]; then
+  mkdir -p "${_TRAEFIK_SECRETS_DIR}"; chmod 700 "${_TRAEFIK_SECRETS_DIR}" 2>/dev/null || true
+  DASH_AUTH="haldir:$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | cut -c1-24)"
+  ( umask 077; printf 'DASHBOARD_AUTH=%s\n' "${DASH_AUTH}" > "${_TRAEFIK_SECRETS_FILE}" )
+  echo " * Traefik dashboard: identifiants générés -> ${_TRAEFIK_SECRETS_FILE}"
+fi
 DASH_USER="${DASH_AUTH%%:*}"
 DASH_PASS="${DASH_AUTH#*:}"
 HTPASSWD_BIN="$(command -v htpasswd 2>/dev/null || true)"

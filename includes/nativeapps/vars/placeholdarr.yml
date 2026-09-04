@@ -23,12 +23,12 @@ env:
   APPDATA_PATH: __APP_DATA_DIR__/config
   PLACEHOLDARR_SKIP_WEBHOOK_CHECK: "true"
   LIBRARY_ROOT: /Users/haldir/Medias
-  TMDB_API_KEY: ***REMOVED-CREDENTIAL***
+  TMDB_API_KEY: __SECRET__
   PLACEHOLDER_METADATA_LANGUAGE: fr-FR
   DB_HOST: localhost
   DB_PORT: "5432"
   DB_USER: placeholdarr
-  DB_PASS: ***REMOVED-CREDENTIAL***
+  DB_PASS: __SECRET__
   DB_NAME: placeholdarr
   DUMMY_FILE_PATH: __APP_DATA_DIR__/config/dummy.mp4
   COMING_SOON_DUMMY_FILE_PATH: __APP_DATA_DIR__/config/coming_soon_dummy.mp4

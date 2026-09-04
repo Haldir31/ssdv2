@@ -17,7 +17,7 @@ env:
   RC_PG_PORT: "5432"
   RC_PG_DB: streamfusion
   RC_PG_USER: streamfusion
-  RC_PG_PASS: ***REMOVED-CREDENTIAL***
+  RC_PG_PASS: __SECRET__
   RC_PORT: "8791"
   RC_IMDB_DUCKDB: /Users/haldir/stream-fusion-reborn/data/imdb_db/imdb.duckdb
   RC_MIN_SEEDERS: "1"

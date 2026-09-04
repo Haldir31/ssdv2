@@ -118,6 +118,36 @@ while IFS= read -r line || [ -n "${line}" ]; do
   esac
 done < "${VARS_FILE}"
 
+# ---------------------------------------------------------------------------
+# secret resolution
+# ---------------------------------------------------------------------------
+# Secrets never live in vars/<name>.yml (the repo is a public fork). Any env
+# value that is EXACTLY the literal __SECRET__ is filled in here from
+#   ${SSD_SECRETS_DIR:-~/.config/ssd/native-secrets}/<name>.env
+# — a chmod-600 file of "KEY=VALUE" lines, outside git. A missing file or a
+# missing/empty key is a hard error (better than silently installing an app
+# with a blank password). See includes/nativeapps/SECRETS.md.
+SECRETS_DIR="${SSD_SECRETS_DIR:-${HOME}/.config/ssd/native-secrets}"
+SECRETS_FILE="${SECRETS_DIR}/${NAME}.env"
+if [ "${#ENV_VALS[@]}" -gt 0 ]; then
+  for _i in "${!ENV_VALS[@]}"; do
+    [ "${ENV_VALS[$_i]}" = "__SECRET__" ] || continue
+    if [ ! -f "${SECRETS_FILE}" ]; then
+      echo -e "${RED}${NAME} : des secrets (__SECRET__) sont requis mais ${SECRETS_FILE} est absent.${NC}" >&2
+      echo -e "${YELLOW}  Crée-le avec des lignes KEY=VALUE (chmod 600). Modèle : includes/nativeapps/SECRETS.md${NC}" >&2
+      exit 1
+    fi
+    _k="${ENV_KEYS[$_i]}"
+    _v="$(sed -n "s/^${_k}=//p" "${SECRETS_FILE}" | head -1)"
+    _v="$(unquote "${_v}")"
+    if [ -z "${_v}" ]; then
+      echo -e "${RED}${NAME} : clé secrète '${_k}' absente ou vide dans ${SECRETS_FILE}${NC}" >&2
+      exit 1
+    fi
+    ENV_VALS[$_i]="${_v}"
+  done
+fi
+
 # --- bundle: a meta-app that just installs several native apps in order, then
 #     renders one shared reverse-proxy config (e.g. webui = backend + 2 frontends
 #     behind a single host with path prefixes). No kind/build/LaunchAgent of its

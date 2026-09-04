@@ -28,8 +28,9 @@ env:
   LOG_LEVEL: http
   LOG_FORMAT: text
   # Login for /dashboard and config saves (config page itself is public —
-  # AIOSTREAMS_AUTH_REQUIRED defaults false). user:pass, comma-separated for more.
-  AIOSTREAMS_AUTH: haldir:***REMOVED-CREDENTIAL***
+  # AIOSTREAMS_AUTH_REQUIRED defaults false). user:pass (comma-separated for
+  # more) — value from native-secrets/aiostreams.env.
+  AIOSTREAMS_AUTH: __SECRET__
   # Per-addon fetch timeout override (ms). Global DEFAULT_TIMEOUT is 7000, too
   # tight for StreamFusion (a debrid scraper hitting live indexers — legit
   # 3-7s/query, so ~half the requests were timing out). 2026-09-02.

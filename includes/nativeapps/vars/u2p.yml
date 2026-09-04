@@ -37,19 +37,19 @@ env:
   ATHANOR_DATABASE_POSTGRES_PORT: "5432"
   ATHANOR_DATABASE_POSTGRES_DATABASE: athanor
   ATHANOR_DATABASE_POSTGRES_USER: athanor
-  ATHANOR_DATABASE_POSTGRES_PASSWORD: ***REMOVED-CREDENTIAL***
+  ATHANOR_DATABASE_POSTGRES_PASSWORD: __SECRET__
   ATHANOR_DATABASE_POSTGRES_SSLMODE: disable
   ATHANOR_CURATOR_ENABLED: "false"
   # Dashboard login (server.admin_username / server.admin_password). Default is
   # admin/admin and config.yaml reverts on every reinstall, so pin it here.
-  # Set BOTH to "-" to disable auth entirely.
+  # Password from native-secrets/u2p.env. Set BOTH to "-" to disable auth.
   ATHANOR_SERVER_ADMIN_USERNAME: "haldir"
-  ATHANOR_SERVER_ADMIN_PASSWORD: "***REMOVED-CREDENTIAL***"
+  ATHANOR_SERVER_ADMIN_PASSWORD: __SECRET__
   # Meili ON so the Settings page loads (it hard-fails on a 503 from /meili/status).
   # OWN index name — NOT reborn's "torrents" index (native com.haldir.meilisearch).
   ATHANOR_MEILISEARCH_ENABLED: "true"
   ATHANOR_MEILISEARCH_URL: http://127.0.0.1:7700
-  ATHANOR_MEILISEARCH_API_KEY: ***REMOVED-CREDENTIAL***
+  ATHANOR_MEILISEARCH_API_KEY: __SECRET__
   ATHANOR_MEILISEARCH_INDEX_NAME: athanor_torrents
   # Sync throughput tuning (defaults 100 MB/h + 1000 events/relay + 3 concurrent
   # are far too low to pull a large single-relay catalogue like the YGG-FR mirror).

@@ -35,10 +35,10 @@ env:
   # in). Set both to require a username/password — needed since it's published
   # on the Cloudflare tunnel.
   SLICKSYNC_PRIVATE_USERNAME: haldir
-  SLICKSYNC_PRIVATE_PASSWORD: ***REMOVED-CREDENTIAL***
+  SLICKSYNC_PRIVATE_PASSWORD: __SECRET__
   # Live "Now Playing" presence via the native AIOStreams proxy (optional).
   AIOSTREAMS_URL: https://aiostreams.jmiflix.fr
   AIOSTREAMS_AUTH_USERNAME: haldir
-  AIOSTREAMS_AUTH_PASSWORD: ***REMOVED-CREDENTIAL***
+  AIOSTREAMS_AUTH_PASSWORD: __SECRET__
   # Used only to build clickable links in Discord notifications.
   PUBLIC_APP_URL: https://slicksync.jmiflix.fr

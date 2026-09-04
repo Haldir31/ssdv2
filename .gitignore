@@ -125,3 +125,8 @@ fabric.properties
 .idea/codestream.xml
 
 # End of https://www.toptal.com/developers/gitignore/api/cloud9,phpstorm
+
+# SSD native-app secrets (never commit real credentials)
+**/native-secrets/
+*.secret.env
+includes/nativeapps/vars/*.local.yml
