@@ -362,5 +362,183 @@ if "isNonFrenchContent" not in t2:
     t2 = t2.replace(OLD_SHOULDINDEX, NEW_SHOULDINDEX, 1)
 
     ci2.write_text(t2); print(" * curator_integration.go: FR-only content filter (title marker)")
+
+# --- patch 8: sync-scheduler must not depend on activeset-manager ---
+# The "sync-scheduler" lifecycle service (which actually triggers NIP-77
+# syncs, both for Active Set relays AND for manually-managed "orphan"
+# configs) was registered *inside* `if a.activeSetMgr != nil` with
+# depends_on=["activeset-manager","nip77-syncer"]. With active_set.enabled=
+# false (patch 7's FR-only lockdown), activeset-manager is never
+# constructed/registered at all, so sync-scheduler silently never started
+# either -- killing automatic syncing for EVERY config, including the one
+# FR relay we actually want to keep. Separately, runSyncCycle() returned
+# early whenever the Active Set was empty, before ever reaching the orphan
+# sweep, so even a manually-started scheduler would have done nothing.
+ss = pathlib.Path("internal/activeset/sync_scheduler.go")
+s3 = ss.read_text()
+if "activeSetMgr may be nil when active_set.enabled=false" not in s3:
+    OLD_CTOR = ('func NewSyncScheduler(activeSetMgr *Manager, syncer SyncerInterface, interval time.Duration, clock platform.Clock) *SyncScheduler {\n'
+                '\tif clock == nil {\n'
+                '\t\tclock = platform.RealClock{}\n'
+                '\t}\n'
+                '\treturn &SyncScheduler{\n'
+                '\t\tactiveSetMgr: activeSetMgr,\n'
+                '\t\tsyncer:       syncer,\n'
+                '\t\tinterval:     interval,\n'
+                '\t\tlogger:       activeSetMgr.logger.With().Str("component", "sync_scheduler").Logger(),\n'
+                '\t\ttriggerCh:    make(chan struct{}, 1),\n'
+                '\t\tclock:        clock,\n'
+                '\t}\n'
+                '}\n')
+    NEW_CTOR = ('func NewSyncScheduler(activeSetMgr *Manager, syncer SyncerInterface, interval time.Duration, clock platform.Clock) *SyncScheduler {\n'
+                '\tif clock == nil {\n'
+                '\t\tclock = platform.RealClock{}\n'
+                '\t}\n'
+                '\t// activeSetMgr may be nil when active_set.enabled=false: the scheduler\n'
+                '\t// still needs to run so manually-managed (orphan) sync configs keep\n'
+                '\t// syncing on their own schedule (patch_u2p.sh). Fall back to the\n'
+                '\t// package logger rather than dereferencing a nil manager.\n'
+                '\tlog := logger.With().Str("component", "sync_scheduler").Logger()\n'
+                '\tif activeSetMgr != nil {\n'
+                '\t\tlog = activeSetMgr.logger.With().Str("component", "sync_scheduler").Logger()\n'
+                '\t}\n'
+                '\treturn &SyncScheduler{\n'
+                '\t\tactiveSetMgr: activeSetMgr,\n'
+                '\t\tsyncer:       syncer,\n'
+                '\t\tinterval:     interval,\n'
+                '\t\tlogger:       log,\n'
+                '\t\ttriggerCh:    make(chan struct{}, 1),\n'
+                '\t\tclock:        clock,\n'
+                '\t}\n'
+                '}\n')
+    if OLD_CTOR not in s3:
+        raise SystemExit("patch_u2p patch 8: sync_scheduler.go NewSyncScheduler not found - upstream changed")
+    s3 = s3.replace(OLD_CTOR, NEW_CTOR, 1)
+
+    OLD_CYCLE = ('\t// Get sync relays from Active Set\n'
+                 '\trelays := s.activeSetMgr.GetActiveSet(SetTypeSync)\n'
+                 '\tif len(relays) == 0 {\n'
+                 '\t\ts.logger.Warn().Ctx(ctx).Msg("No relays in Sync Active Set, skipping sync cycle")\n'
+                 '\t\treturn\n'
+                 '\t}\n')
+    NEW_CYCLE = ('\t// Get sync relays from Active Set. activeSetMgr is nil when\n'
+                 '\t// active_set.enabled=false -- treat that the same as an empty Active Set\n'
+                 '\t// rather than skipping the cycle, so Phase 2 (orphan sweep, below) still\n'
+                 '\t// runs and manually-managed sync configs keep syncing (patch_u2p.sh).\n'
+                 '\tvar relays []RelayWithScore\n'
+                 '\tif s.activeSetMgr != nil {\n'
+                 '\t\trelays = s.activeSetMgr.GetActiveSet(SetTypeSync)\n'
+                 '\t}\n'
+                 '\tif len(relays) == 0 {\n'
+                 '\t\ts.logger.Debug().Ctx(ctx).Msg("No relays in Sync Active Set — orphan-only sync cycle")\n'
+                 '\t}\n')
+    if OLD_CYCLE not in s3:
+        raise SystemExit("patch_u2p patch 8: sync_scheduler.go runSyncCycle early-return not found - upstream changed")
+    s3 = s3.replace(OLD_CYCLE, NEW_CYCLE, 1)
+    ss.write_text(s3); print(" * sync_scheduler.go: nil-safe activeSetMgr + orphan sweep always runs")
+
+rn = pathlib.Path("internal/app/run.go")
+r2 = rn.read_text()
+if "registered independently of the Active Set manager" not in r2:
+    OLD_RUN = ('\t\t// Sync scheduler (created and started only when both activeSetMgr and nip77Syncer available)\n'
+               '\t\tif a.nip77Syncer != nil {\n'
+               '\t\t\tsyncSchedDeps := []string{"activeset-manager", "nip77-syncer"}\n'
+               '\t\t\tsm.Register(\n'
+               '\t\t\t\t&serviceWrapper{\n'
+               '\t\t\t\t\tname: "sync-scheduler",\n'
+               '\t\t\t\t\tstartFn: func(ctx context.Context) error {\n'
+               '\t\t\t\t\t\ta.syncScheduler = activeset.NewSyncScheduler(\n'
+               '\t\t\t\t\t\t\ta.activeSetMgr,\n'
+               '\t\t\t\t\t\t\t&nip77SyncAdapter{syncer: a.nip77Syncer, discoveryMgr: a.discoveryMgr},\n'
+               '\t\t\t\t\t\t\t5*time.Minute,\n'
+               '\t\t\t\t\t\t\tnil, // use default clock\n'
+               '\t\t\t\t\t\t)\n'
+               '\t\t\t\t\t\t// Wire athanor sync priority weight from config (default 1.5 if unset).\n'
+               '\t\t\t\t\t\tathanorWeight := a.cfg.Athanor.SyncPriorityWeight\n'
+               '\t\t\t\t\t\tif athanorWeight == 0 {\n'
+               '\t\t\t\t\t\t\tathanorWeight = 1.5\n'
+               '\t\t\t\t\t\t}\n'
+               '\t\t\t\t\t\ta.syncScheduler.SetAthanorSyncPriorityWeight(athanorWeight)\n'
+               '\t\t\t\t\t\ta.syncScheduler.Start(ctx)\n'
+               '\t\t\t\t\t\tlogger.Info().Ctx(ctx).Msg("Active Set sync scheduler started")\n'
+               '\n'
+               '\t\t\t\t\t\t// Wire: Active Set rebuild -> Sync Scheduler notification.\n'
+               '\t\t\t\t\t\tscheduler := a.syncScheduler\n'
+               '\t\t\t\t\t\tevents.Subscribe[events.ActiveSetRebuilt](a.bus, "sync-scheduler", false, func(e events.ActiveSetRebuilt) error {\n'
+               '\t\t\t\t\t\t\tscheduler.NotifyNewRelays()\n'
+               '\t\t\t\t\t\t\treturn nil\n'
+               '\t\t\t\t\t\t})\n'
+               '\t\t\t\t\t\treturn nil\n'
+               '\t\t\t\t\t},\n'
+               '\t\t\t\t\tstopFn: func(ctx context.Context) error {\n'
+               '\t\t\t\t\t\tif a.syncScheduler != nil {\n'
+               '\t\t\t\t\t\t\ta.syncScheduler.Stop()\n'
+               '\t\t\t\t\t\t\tlogger.Info().Ctx(ctx).Msg("Active Set sync scheduler stopped")\n'
+               '\t\t\t\t\t\t}\n'
+               '\t\t\t\t\t\treturn nil\n'
+               '\t\t\t\t\t},\n'
+               '\t\t\t\t},\n'
+               '\t\t\t\tlifecycle.DependsOn(syncSchedDeps...),\n'
+               '\t\t\t\tlifecycle.Optional(),\n'
+               '\t\t\t)\n'
+               '\t\t}\n'
+               '\t}\n')
+    NEW_RUN = ('\t}\n'
+               '\n'
+               '\t// Sync scheduler — registered independently of the Active Set manager\n'
+               '\t// (patch_u2p.sh). With active_set.enabled=false, "activeset-manager" is\n'
+               '\t// never registered as a lifecycle service; previously this whole block\n'
+               '\t// lived inside `if a.activeSetMgr != nil`, so disabling the Active Set\n'
+               '\t// silently killed automatic syncing for EVERY sync config, including\n'
+               '\t// manually-managed ("orphan") ones. Depend on activeset-manager only\n'
+               '\t// when it actually exists.\n'
+               '\tif a.nip77Syncer != nil {\n'
+               '\t\tsyncSchedDeps := []string{"nip77-syncer"}\n'
+               '\t\tif a.activeSetMgr != nil {\n'
+               '\t\t\tsyncSchedDeps = append(syncSchedDeps, "activeset-manager")\n'
+               '\t\t}\n'
+               '\t\tsm.Register(\n'
+               '\t\t\t&serviceWrapper{\n'
+               '\t\t\t\tname: "sync-scheduler",\n'
+               '\t\t\t\tstartFn: func(ctx context.Context) error {\n'
+               '\t\t\t\t\ta.syncScheduler = activeset.NewSyncScheduler(\n'
+               '\t\t\t\t\t\ta.activeSetMgr,\n'
+               '\t\t\t\t\t\t&nip77SyncAdapter{syncer: a.nip77Syncer, discoveryMgr: a.discoveryMgr},\n'
+               '\t\t\t\t\t\t5*time.Minute,\n'
+               '\t\t\t\t\t\tnil, // use default clock\n'
+               '\t\t\t\t\t)\n'
+               '\t\t\t\t\t// Wire athanor sync priority weight from config (default 1.5 if unset).\n'
+               '\t\t\t\t\tathanorWeight := a.cfg.Athanor.SyncPriorityWeight\n'
+               '\t\t\t\t\tif athanorWeight == 0 {\n'
+               '\t\t\t\t\t\tathanorWeight = 1.5\n'
+               '\t\t\t\t\t}\n'
+               '\t\t\t\t\ta.syncScheduler.SetAthanorSyncPriorityWeight(athanorWeight)\n'
+               '\t\t\t\t\ta.syncScheduler.Start(ctx)\n'
+               '\t\t\t\t\tlogger.Info().Ctx(ctx).Msg("Active Set sync scheduler started")\n'
+               '\n'
+               '\t\t\t\t\t// Wire: Active Set rebuild -> Sync Scheduler notification.\n'
+               '\t\t\t\t\tscheduler := a.syncScheduler\n'
+               '\t\t\t\t\tevents.Subscribe[events.ActiveSetRebuilt](a.bus, "sync-scheduler", false, func(e events.ActiveSetRebuilt) error {\n'
+               '\t\t\t\t\t\tscheduler.NotifyNewRelays()\n'
+               '\t\t\t\t\t\treturn nil\n'
+               '\t\t\t\t\t})\n'
+               '\t\t\t\t\treturn nil\n'
+               '\t\t\t\t},\n'
+               '\t\t\t\tstopFn: func(ctx context.Context) error {\n'
+               '\t\t\t\t\tif a.syncScheduler != nil {\n'
+               '\t\t\t\t\t\ta.syncScheduler.Stop()\n'
+               '\t\t\t\t\t\tlogger.Info().Ctx(ctx).Msg("Active Set sync scheduler stopped")\n'
+               '\t\t\t\t\t}\n'
+               '\t\t\t\t\treturn nil\n'
+               '\t\t\t\t},\n'
+               '\t\t\t},\n'
+               '\t\t\tlifecycle.DependsOn(syncSchedDeps...),\n'
+               '\t\t\tlifecycle.Optional(),\n'
+               '\t\t)\n'
+               '\t}\n')
+    if OLD_RUN not in r2:
+        raise SystemExit("patch_u2p patch 8: run.go sync-scheduler block not found - upstream changed")
+    r2 = r2.replace(OLD_RUN, NEW_RUN, 1)
+    rn.write_text(r2); print(" * run.go: sync-scheduler no longer depends on activeset-manager")
 PYEOF
 echo -e " ${GREEN}* [patch_u2p] curator crash-loop guard applied${NC}"
