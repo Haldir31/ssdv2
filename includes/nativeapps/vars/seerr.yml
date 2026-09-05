@@ -1,0 +1,9 @@
+name: seerr
+kind: node
+repo: https://github.com/seerr-team/seerr.git
+ref: develop
+build_cmd: corepack enable pnpm && pnpm install --frozen-lockfile && pnpm build
+start_cmd: CONFIG_DIRECTORY=__APP_DATA_DIR__/config HOST=127.0.0.1 PORT=5055 NODE_ENV=production exec node dist/index.js
+port: 5055
+health_path: /api/v1/status
+data_dir: seerr
