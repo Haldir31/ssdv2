@@ -2,6 +2,12 @@
 # Docker equivalent: includes/dockerapps/vars/decypharr.yml (image cy01/blackhole)
 # Upstream: https://github.com/sirrobot01/decypharr  (Go 1.26, CGO_ENABLED=1)
 #
+# 2026-09-05: tracking Aerya's fork, branch fix/pr-199-alldebrid-slot-conflicts
+# (unmerged upstream) — adds AllDebrid slot management strategies
+# (remove_oldest/remove_after_add) plus several other fixes/features ahead of
+# sirrobot01/decypharr main (strm file support, virtual folder redesign,
+# webdav streaming). Revert repo/ref to sirrobot01/decypharr@main to go back.
+#
 # Requires macFUSE (already installed on this Mac for the infinidysk mount).
 # On first run, edit <storage>/native/decypharr/config.json with your
 # AllDebrid / RealDebrid token(s) and mount/library paths, then:
@@ -10,8 +16,8 @@
 # served outside the auth-gated routes — unlike /, which can 302 to /login)
 name: decypharr
 kind: go
-repo: https://github.com/sirrobot01/decypharr.git
-ref: main
+repo: https://github.com/Aerya/decypharr.git
+ref: fix/pr-199-alldebrid-slot-conflicts
 build_cmd: CGO_ENABLED=1 go build -trimpath -ldflags "-w -s" -o decypharr .
 start_cmd: ./decypharr --config "$DECYPHARR_CONFIG_DIR"
 port: 8282

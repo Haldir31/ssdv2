@@ -1,0 +1,23 @@
+# Garage — self-hosted S3-compatible object store (Deuxfleurs project),
+#   single-node config, used as Silo's storage backend.
+#   Upstream: https://garagehq.deuxfleurs.fr/ (Homebrew formula: garage 2.3.0)
+#
+# 2026-09-05: installed to back Silo's native S3 support (see vars/silo.yml,
+# internal/config/admin_settings.go `s3.*` keys). Single-node, replication
+# factor 1 — Garage still requires an explicit *layout* (node capacity
+# assignment) before it'll store anything; that + bucket/key creation is a
+# one-time manual bootstrap after first install (garage CLI), not something
+# this installer does — see project_silo_server_install.md / memory for the
+# exact commands run.
+#
+# Ports: S3 API 3900, RPC 3901 (unused, single node), Admin API 3903 — all
+# loopback-only. Public S3 endpoint is s3.jmiflix.fr (Traefik router added by
+# hand, same pattern as jellyfin.jmiflix.fr — Garage isn't itself the public
+# hostname the user wants, so no port here would auto-publish "garage.jmiflix.fr"
+# uselessly; kept port unset and health-checked via curl instead).
+name: garage
+kind: brew
+formula: garage
+config_render: render_garage_config.sh
+data_dir: garage
+start_cmd: exec /opt/homebrew/opt/garage/bin/garage --config __APP_DATA_DIR__/config.toml server

@@ -1,0 +1,37 @@
+# Silo — modern self-hosted media server (Postgres + S3 + Redis by design,
+#   Jellyfin-protocol compatible). Upstream: https://github.com/Silo-Server/silo-server
+#
+# 2026-09-05: ported into ssdv2's native-app catalog. Fresh clone of the
+# OFFICIAL repo, main branch — no local patches (see the old ~/src/silo-server
+# hand-rolled install / project_silo_server_install.md for the HEVC-transcode
+# and macOS-nodemetrics patches it used to carry, not re-applied here).
+#
+# Fresh install, user's call 2026-09-05: brand-new Postgres db `silo_fresh`
+# (role `silo`, same native/brew-services instance everything else uses) and
+# a freshly generated SECRET_KEY — the OLD `silo` db (3217 media_items from
+# the previous hand-rolled install) is left untouched/unused, not reused here.
+#
+# Port: 8092 (the old install's 8090 is now ssdv2's own Traefik dashboard).
+# jellycompat/ABS-compat ports are DB-configured (server_settings), not via
+# this file — set them fresh from Silo's own admin UI after first login.
+#
+# Garage S3 (vars/garage.yml) is the intended S3 backend for Silo's storage —
+# install that first, then set Silo's S3 settings (admin UI or server_settings,
+# see internal/config/admin_settings.go `s3.*` keys) once Garage has a bucket.
+name: silo
+kind: go
+repo: https://github.com/Silo-Server/silo-server.git
+ref: main
+build_cmd: make build
+start_cmd: until nc -z 127.0.0.1 5432 && nc -z 127.0.0.1 6379; do sleep 2; done; exec ./silo
+port: 8092
+health_path: /
+data_dir: silo
+env:
+  DATABASE_URL: __SECRET__
+  REDIS_URL: redis://localhost:6379
+  SECRET_KEY: __SECRET__
+  SILO_DATA_ROOT: __APP_DATA_DIR__/silo-data
+  MEDIA_ROOT: /Users/haldir/media
+  MODE: integrated
+  PORT: "8092"

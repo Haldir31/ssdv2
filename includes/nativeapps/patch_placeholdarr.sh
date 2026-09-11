@@ -469,60 +469,325 @@ if "_localize_episode" not in s:
 PYEOF
 say "patch 7 (French episodes + genres) applied"
 
-# --- patch 8: episode still in NFO + plain .jpg sidecar ------------------
-# Placeholder episodes showed a grey frame from the dummy .mp4 instead of a
-# still. The episode NFO carried no <thumb>, and the still sidecar was only
-# written as <basename>-thumb.jpg (Kodi convention). Emit <thumb>URL</thumb>
-# and also copy the still to <basename>.jpg (Plex/Jellyfin convention).
-# (Plex's own tv.plex.agents.nfo.series still ignores both for episodes — this
-#  helps Jellyfin/Emby + a direct API push if one is added later.)
+# --- patch 8: strip ALL placeholder art / sidecar files -----------------
+# User wants placeholder folders to hold ONLY the dummy .mp4 and let Plex's
+# optimised official agents (tv.plex.agents.movie / .series) fetch every poster,
+# still, fanart and metadata themselves. No-op the three low-level writers that
+# produce poster.jpg / folder.jpg / seasonNN-poster.jpg / *-thumb.jpg /
+# poster-grid.jpg / .poster-overlay.json. The dashboard falls back to the stored
+# remote_poster TMDB URLs. (NFO already off via patch 9.)
+python3 - "${SRC}" <<'PYEOF'
+import sys, pathlib, ast
+p = pathlib.Path(sys.argv[1]) / "services/placeholder_poster_art.py"
+s = p.read_text(encoding="utf-8")
+MARK = "# patch_placeholdarr: placeholder art/sidecars disabled"
+if MARK not in s:
+    repls = [
+      ('def _write_art_file(\n    output_path: str,\n    source_url: str | None,\n    *,\n    mode: str,\n    landscape: bool,\n    meta_key: str,\n    source_kind: str = "",\n) -> bool:\n    url = _normalize_art_url(source_url)\n',
+       'def _write_art_file(\n    output_path: str,\n    source_url: str | None,\n    *,\n    mode: str,\n    landscape: bool,\n    meta_key: str,\n    source_kind: str = "",\n) -> bool:\n    ' + MARK + '\n    return False\n    url = _normalize_art_url(source_url)\n'),
+      ('def write_library_grid_poster(folder: str, source_url: str | None) -> bool:\n    """Write ``poster-grid.jpg`` (raw catalog art) beside composited ``poster.jpg``."""\n',
+       'def write_library_grid_poster(folder: str, source_url: str | None) -> bool:\n    """Write ``poster-grid.jpg`` (raw catalog art) beside composited ``poster.jpg``."""\n    ' + MARK + '\n    return False\n'),
+      ('def _publish_series_folder_poster(poster_path: str) -> None:\n    """Plex/Jellyfin often prefer folder.jpg for TV show posters in the series root."""\n',
+       'def _publish_series_folder_poster(poster_path: str) -> None:\n    """Plex/Jellyfin often prefer folder.jpg for TV show posters in the series root."""\n    ' + MARK + '\n    return\n'),
+    ]
+    for old, new in repls:
+        if old not in s:
+            raise SystemExit("patch 8: art writer anchor not found - upstream changed")
+        s = s.replace(old, new, 1)
+    ast.parse(s)
+    p.write_text(s, encoding="utf-8")
+    print(" * placeholder_poster_art.py: all art / sidecar writers disabled")
+PYEOF
+say "patch 8 (no art / sidecars) applied"
+
+# --- patch 9: disable placeholder .nfo creation -------------------------
+# User runs Plex-only with the official agents (tv.plex.agents.movie/series),
+# which ignore NFO entirely. PLACEHOLDER_CREATE_NFO is force-True by a validator
+# so it can't be turned off in-app -> no-op the three writers. Nothing gates on
+# NFO existence (materializer only reports a counter; cleanup markers use the DB
+# + dummy-file name pattern).
 python3 - "${SRC}" <<'PYEOF'
 import sys, pathlib
-src = pathlib.Path(sys.argv[1])
-pl = src / "services/placeholders.py"
-p = pl.read_text(encoding="utf-8")
-if '<thumb>{escape(_ep_still)}</thumb>' not in p:
-    OLD = ("        lines.append(f\"  <plot>{plot}</plot>\")\n"
-           "    else:\n"
-           "        lines.append(f\"  <plot>{escape(project_summary('', status, runtime_minutes=rm, media_context=media_ctx))}</plot>\")\n"
-           "    if tvdbid:\n")
-    NEW = ("        lines.append(f\"  <plot>{plot}</plot>\")\n"
-           "    else:\n"
-           "        lines.append(f\"  <plot>{escape(project_summary('', status, runtime_minutes=rm, media_context=media_ctx))}</plot>\")\n"
-           "    _ep_still = str(getattr(episode, \"sonarr_episode_still\", \"\") or \"\").strip()\n"
-           "    if _ep_still:\n"
-           "        lines.append(f\"  <thumb>{escape(_ep_still)}</thumb>\")\n"
-           "    if tvdbid:\n")
-    if OLD not in p:
-        raise SystemExit("patch_placeholdarr patch 8: _episode_nfo_xml plot block not found - upstream changed")
-    pl.write_text(p.replace(OLD, NEW, 1), encoding="utf-8")
-    print(" * placeholders.py: episode NFO <thumb>")
-
-pa = src / "services/placeholder_poster_art.py"
-a = pa.read_text(encoding="utf-8")
-if "Plex/Kodi/Jellyfin\n" not in a and '_plain = os.path.splitext' not in a:
-    OLD_A = ("        result.local_art.thumb = thumb_name\n"
-             "        result.wrote_any = True\n"
-             "        result.art_counts[\"episode\"] = 1\n"
-             "    return result\n")
-    NEW_A = ("        result.local_art.thumb = thumb_name\n"
-             "        result.wrote_any = True\n"
-             "        result.art_counts[\"episode\"] = 1\n"
-             "        try:\n"
-             "            _plain = os.path.splitext(os.path.basename(media_path))[0] + \".jpg\"\n"
-             "            _plain_path = os.path.join(folder, _plain)\n"
-             "            if os.path.isfile(thumb_path):\n"
-             "                import shutil as _sh\n"
-             "                _sh.copyfile(thumb_path, _plain_path)\n"
-             "        except OSError:\n"
-             "            pass\n"
-             "    return result\n")
-    if OLD_A not in a:
-        raise SystemExit("patch_placeholdarr patch 8: ensure_episode_still_art tail not found - upstream changed")
-    pa.write_text(a.replace(OLD_A, NEW_A, 1), encoding="utf-8")
-    print(" * placeholder_poster_art.py: <basename>.jpg episode still sidecar")
+p = pathlib.Path(sys.argv[1]) / "services/placeholders.py"
+s = p.read_text(encoding="utf-8")
+MARK = "# patch_placeholdarr: NFO creation disabled"
+if MARK not in s:
+    OLD = ('def ensure_movie_nfo(media_path: str, movie: Any) -> bool:\n'
+           '    return _atomic_write_text(nfo_sidecar_path(media_path), _movie_nfo_xml(movie))\n\n\n'
+           'def ensure_episode_nfo(media_path: str, episode: Any, season: Any, series: Any) -> bool:\n'
+           '    return _atomic_write_text(\n'
+           '        nfo_sidecar_path(media_path),\n'
+           '        _episode_nfo_xml(episode, season, series),\n'
+           '    )\n')
+    NEW = ('def ensure_movie_nfo(media_path: str, movie: Any) -> bool:\n'
+           '    ' + MARK + ' (user request; Plex official agents ignore NFO)\n'
+           '    return True\n\n\n'
+           'def ensure_episode_nfo(media_path: str, episode: Any, season: Any, series: Any) -> bool:\n'
+           '    ' + MARK + '\n'
+           '    return True\n')
+    if OLD not in s:
+        raise SystemExit("patch 9: movie/episode nfo anchor not found - upstream changed")
+    s = s.replace(OLD, NEW, 1)
+    OLD2 = ('    nfo_path = os.path.join(target_folder, "tvshow.nfo")\n'
+            '    return _atomic_write_text(nfo_path, _series_nfo_xml(series))\n')
+    NEW2 = ('    ' + MARK + ' (skip tvshow.nfo write)\n'
+            '    _ = target_folder\n'
+            '    return True\n')
+    if OLD2 not in s:
+        raise SystemExit("patch 9: series nfo anchor not found - upstream changed")
+    s = s.replace(OLD2, NEW2, 1)
+    import ast; ast.parse(s)
+    p.write_text(s, encoding="utf-8")
+    print(" * placeholders.py: NFO creation disabled")
 PYEOF
-say "patch 8 (episode still nfo/jpg) applied"
+say "patch 9 (no NFO) applied"
+
+# --- patch 10: clear Plex watched flag when the real file is imported ------
+# The tiny (~4s) dummy: a few seconds of playback pushes Plex past its
+# ~90%-of-duration watched threshold, and that flag then sticks on the real
+# episode/movie after the swap. Fix: on import_grace finalize, call Plex
+# /:/unscrobble for the item (uses the ratingKey placeholdarr already stores).
+python3 - "$SRC" <<'PYEOF'
+import sys, pathlib
+src = pathlib.Path(sys.argv[1])
+MARK = "# patch_placeholdarr: reset watched state after a real file is imported"
+
+# 1) plex.py — append the unscrobble helper
+p = src / "services/media_servers/plex.py"
+s = p.read_text(encoding="utf-8")
+if MARK not in s:
+    s += '''
+
+''' + MARK + ''' ---------
+def set_plex_item_unwatched(rating_key: str | int) -> str:
+    """Mark a Plex library item unwatched (clears watched flag + view offset)."""
+    if not getattr(settings, "plex_enabled", False):
+        return "skipped"
+    key = str(rating_key or "").strip()
+    if not key:
+        return "skipped"
+    plex_url, plex_token = _plex_base_and_token()
+    if not plex_url or not plex_token:
+        return "skipped"
+    try:
+        response = requests.get(
+            f"{plex_url}/:/unscrobble",
+            params={"identifier": "com.plexapp.plugins.library", "key": key},
+            headers={"X-Plex-Token": plex_token},
+            timeout=15,
+        )
+        response.raise_for_status()
+        logger.info(f"Plex item marked unwatched after import rating_key={key}", extra={"emoji_type": "refresh"})
+        return "ok"
+    except Exception as ex:
+        logger.warning(f"Plex unwatch failed rating_key={key}: {ex}", extra={"emoji_type": "warning"})
+        return "failed"
+'''
+    import ast; ast.parse(s)
+    p.write_text(s, encoding="utf-8")
+    print(" * plex.py: set_plex_item_unwatched added")
+
+# 2) import_grace.py — helper + 2 call sites
+p = src / "services/source_of_truth/import_grace.py"
+s = p.read_text(encoding="utf-8")
+if MARK not in s:
+    anchor = "from services.status_projection import projected_status_display\n"
+    helper = anchor + '''
+
+''' + MARK + '''
+def _unmark_watched_after_import(row) -> None:
+    if not bool(getattr(settings, "PLACEHOLDER_UNMARK_WATCHED_ON_IMPORT", True)):
+        return
+    rk = str(getattr(row, "plex_id", "") or getattr(row, "plex_dummy_id", "") or "").strip()
+    if not rk:
+        return
+    try:
+        from services.media_servers.plex import set_plex_item_unwatched
+        set_plex_item_unwatched(rk)
+    except Exception:
+        pass
+'''
+    if anchor not in s:
+        raise SystemExit("patch 10: import_grace anchor not found - upstream changed")
+    s = s.replace(anchor, helper, 1)
+    mv_old = "            movie_ref = session.query(Movie).filter(Movie.id == entity_id).first()\n"
+    mv_new = mv_old + "            if movie_ref is not None:\n                _unmark_watched_after_import(movie_ref)\n"
+    ep_old = "            if ctx:\n                ep, season, series = ctx\n"
+    ep_new = "            if ctx:\n                ep, season, series = ctx\n                _unmark_watched_after_import(ep)\n"
+    for o, n in ((mv_old, mv_new), (ep_old, ep_new)):
+        if o not in s:
+            raise SystemExit("patch 10: import_grace call-site not found - upstream changed")
+        s = s.replace(o, n, 1)
+    import ast; ast.parse(s)
+    p.write_text(s, encoding="utf-8")
+    print(" * import_grace.py: unmark-watched on finalize")
+
+# 3) config.py — the toggle
+p = src / "core/config.py"
+s = p.read_text(encoding="utf-8")
+if "PLACEHOLDER_UNMARK_WATCHED_ON_IMPORT" not in s:
+    a = '    IMPORT_GRACE_ACCELERATED_STEP_SECONDS: int = int(os.getenv("IMPORT_GRACE_ACCELERATED_STEP_SECONDS", "5").split(\'#\')[0].strip())\n'
+    if a not in s:
+        raise SystemExit("patch 10: config.py anchor not found - upstream changed")
+    s = s.replace(a, a + '    PLACEHOLDER_UNMARK_WATCHED_ON_IMPORT: bool = os.getenv("PLACEHOLDER_UNMARK_WATCHED_ON_IMPORT", "true").split(\'#\')[0].strip().lower() == "true"\n', 1)
+    import ast; ast.parse(s)
+    p.write_text(s, encoding="utf-8")
+    print(" * config.py: PLACEHOLDER_UNMARK_WATCHED_ON_IMPORT toggle")
+PYEOF
+say "patch 10 (unmark watched on import) applied"
+
+# --- patch 11: episode play — resolve localised-title shows via Plex grandparent -
+# tracearr episode webhooks carry only the Plex show title + a per-episode tmdb id.
+# When the Plex agent localised the title (e.g. "Cauchemar en cuisine…" vs Sonarr's
+# "Kitchen Nightmares (FR)"), the title ilike match fails -> unresolved_episode_playback_kind.
+# Fix: look up grandparentRatingKey in Plex, pull the show's real tvdb id from <Guid>.
+python3 - "$SRC" <<'PYEOF'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]) / "services/source_of_truth/event_playback.py"
+s = p.read_text(encoding="utf-8")
+MARK = "def _plex_grandparent_tvdb_id("
+if MARK not in s:
+    HELPER = '''def _plex_grandparent_tvdb_id(payload: dict[str, Any]) -> int | None:
+    """patch_placeholdarr: resolve a localised-title show's real tvdb id from Plex."""
+    data = payload.get('data') if isinstance(payload.get('data'), dict) else {}
+    dm = data.get('media') if isinstance(data.get('media'), dict) else {}
+    rk = (payload.get('grandparentRatingKey') or dm.get('grandparentRatingKey')
+          or (payload.get('media') or {}).get('grandparentRatingKey'))
+    rk = str(rk or '').strip()
+    if not rk:
+        return None
+    try:
+        import requests
+        import xml.etree.ElementTree as ET
+        from services.media_servers.plex import _plex_base_and_token
+        base, token = _plex_base_and_token()
+        if not base or not token:
+            return None
+        resp = requests.get(f"{base}/library/metadata/{rk}",
+                            headers={"X-Plex-Token": token, "Accept": "application/xml"}, timeout=8)
+        resp.raise_for_status()
+        for guid in ET.fromstring(resp.text).iter('Guid'):
+            gid = str(guid.get('id') or '')
+            if gid.startswith('tvdb://'):
+                return _as_int(gid.split('tvdb://', 1)[1].split('?')[0])
+    except Exception as exc:
+        logger.debug(f"plex grandparent tvdb lookup failed rk={rk}: {exc}", extra={'emoji_type': 'debug'})
+    return None
+
+
+def _resolve_playback_context('''
+    s = s.replace("def _resolve_playback_context(", HELPER, 1)
+    OLD = ("    declared_media_type = _extract_declared_media_type(payload)\n"
+           "    series_title = _extract_series_title(payload)\n"
+           "    path_info = _resolve_media_from_path(session, file_path)\n")
+    NEW = ("    declared_media_type = _extract_declared_media_type(payload)\n"
+           "    series_title = _extract_series_title(payload)\n"
+           "    if (declared_media_type == 'episode' and tvdb_id is None and sonarr_series_id is None\n"
+           "            and season_number is not None and episode_number is not None):\n"
+           "        _gp_tvdb = _plex_grandparent_tvdb_id(payload)\n"
+           "        if _gp_tvdb:\n"
+           "            tvdb_id = _gp_tvdb\n"
+           "            logger.info(f\"playback: resolved series tvdb={tvdb_id} via Plex grandparent lookup\", extra={'emoji_type': 'playback'})\n"
+           "    path_info = _resolve_media_from_path(session, file_path)\n")
+    if OLD not in s:
+        raise SystemExit("patch 11: _resolve_playback_context anchor not found - upstream changed")
+    s = s.replace(OLD, NEW, 1)
+    import ast; ast.parse(s)
+    p.write_text(s, encoding="utf-8")
+    print(" * event_playback.py: Plex grandparent tvdb resolution for localised shows")
+PYEOF
+say "patch 11 (episode grandparent resolution) applied"
+
+# --- patch 12: collapse import-grace countdown when status updates are OFF ----
+# The import-grace flow schedules 6 countdown ticks (5/4/3/2/1/<1min) then a
+# finalize step at 6*step (finalize = delete placeholder .mp4 + unmark-watched +
+# Plex library refresh). The ticks only write a display_status string; with
+# PLACEHOLDER_STATUS_UPDATES=OFF that text is shown nowhere, so they are pure
+# delay. When OFF, emit just [noop, finalize] -> finalize one step after import.
+python3 - "$SRC" <<'PYEOF'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]) / "services/source_of_truth/import_grace.py"
+s = p.read_text(encoding="utf-8")
+if "_status_updates_off" not in s:
+    OLD = ("    countdown_texts = _all_countdown_status_texts()\n"
+           "    scheduled: list[dict[str, Any]] = []\n")
+    NEW = ('    countdown_texts = _all_countdown_status_texts()\n\n'
+           '    # patch_placeholdarr: when status updates are OFF the countdown text is never\n'
+           '    # shown anywhere (Plex or elsewhere), so the 5/4/3/2/1-minute ticks are dead\n'
+           '    # weight that only delay the real work. Collapse them: run finalize\n'
+           '    # (placeholder cleanup + unmark-watched + library refresh) one step after\n'
+           '    # import instead of six.\n'
+           '    try:\n'
+           '        from services.status_projection import _updates_scope\n'
+           '        _status_updates_off = _updates_scope() == "OFF"\n'
+           '    except Exception:\n'
+           '        _status_updates_off = False\n'
+           '    if _status_updates_off:\n'
+           '        return [\n'
+           '            {\n'
+           '                "step_index": 0,\n'
+           '                "run_after": now,\n'
+           '                "status_text": countdown_texts[0] if countdown_texts else None,\n'
+           '                "finalize": False,\n'
+           '            },\n'
+           '            {\n'
+           '                "step_index": 1,\n'
+           '                "run_after": now + timedelta(seconds=step),\n'
+           '                "status_text": None,\n'
+           '                "finalize": True,\n'
+           '            },\n'
+           '        ]\n\n'
+           '    scheduled: list[dict[str, Any]] = []\n')
+    if OLD not in s:
+        raise SystemExit("patch 12: build_import_grace_schedule anchor not found - upstream changed")
+    s = s.replace(OLD, NEW, 1)
+    import ast; ast.parse(s)
+    p.write_text(s, encoding="utf-8")
+    print(" * import_grace.py: collapse countdown to a single finalize step when status updates OFF")
+PYEOF
+say "patch 12 (import-grace countdown collapse) applied"
+
+# --- patch 13: don't push player title/summary when status updates are OFF ----
+# player_metadata_refresh pushes the DB episode/movie title+summary onto Plex/
+# Jellyfin/Emby for every placeholder. With PLACEHOLDER_STATUS_UPDATES=OFF there
+# is no status line to add, so this only clobbers the media server agent's own
+# (localised) title/summary with Sonarr/Radarr's (often English) text. When OFF,
+# no-op the push entirely and let the agent own the text.
+python3 - "$SRC" <<'PYEOF'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]) / "services/media_servers/player_metadata_refresh.py"
+s = p.read_text(encoding="utf-8")
+if 'PLACEHOLDER_STATUS_UPDATES=OFF; agent owns text' not in s:
+    OLD = ('    if getattr(settings, "REFRESH_TRIGGER_SUPPRESSED", False):\n'
+           '        logger.debug(\n'
+           '            "Skipping player metadata refresh (REFRESH_TRIGGER_SUPPRESSED)",\n'
+           '            extra={"emoji_type": "debug"},\n'
+           '        )\n'
+           '        return acc\n')
+    NEW = OLD + ('\n'
+           '    # patch_placeholdarr: when status updates are OFF there is no status line to\n'
+           '    # project, so pushing the bare DB title/summary onto the player only serves to\n'
+           '    # clobber whatever the media server\'s own (localised) agent set. Leave the\n'
+           '    # agent in charge - no-op the push entirely.\n'
+           '    try:\n'
+           '        from services.status_projection import _updates_scope\n'
+           '        if _updates_scope() == "OFF":\n'
+           '            logger.debug(\n'
+           '                "Skipping player metadata push (PLACEHOLDER_STATUS_UPDATES=OFF; agent owns text) "\n'
+           '                f"placeholder_id={getattr(placeholder, \'id\', None)}",\n'
+           '                extra={"emoji_type": "debug"},\n'
+           '            )\n'
+           '            return acc\n'
+           '    except Exception:\n'
+           '        pass\n')
+    if OLD not in s:
+        raise SystemExit("patch 13: push_placeholder_player_metadata anchor not found - upstream changed")
+    s = s.replace(OLD, NEW, 1)
+    import ast; ast.parse(s)
+    p.write_text(s, encoding="utf-8")
+    print(" * player_metadata_refresh.py: no-op player text push when PLACEHOLDER_STATUS_UPDATES=OFF")
+PYEOF
+say "patch 13 (no player-text push when status OFF) applied"
 
 # --- seed appdata -------------------------------------------------------
 mkdir -p "${DATA}/config"
