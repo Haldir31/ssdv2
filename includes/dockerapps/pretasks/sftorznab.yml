@@ -1,0 +1,254 @@
+---
+- name: Vérifier le conteneur PostgreSQL StreamFusion
+  community.docker.docker_container_info:
+    name: 'stremio-postgres'
+  register: sftorznab_pg_info
+  when: sftorznab_database_url is not defined or (sftorznab_database_url | string | trim) == ""
+
+- name: Contrôler que la base StreamFusion est démarrée
+  assert:
+    that:
+      - sftorznab_pg_info.exists | default(false)
+      - sftorznab_pg_info.container.State.Running | default(false)
+    fail_msg: >-
+      Le conteneur stremio-postgres (StreamFusion) est introuvable ou arrêté.
+      Installer d'abord l'application streamfusion, ou définir sftorznab_database_url
+      dans une application personnalisée.
+  when: sftorznab_database_url is not defined or (sftorznab_database_url | string | trim) == ""
+
+- name: Vérifier le conteneur proxy warp
+  community.docker.docker_container_info:
+    name: 'warp'
+  register: sftorznab_warp_info
+
+- name: Contrôler que le proxy warp est démarré
+  assert:
+    that:
+      - sftorznab_warp_info.exists | default(false)
+      - sftorznab_warp_info.container.State.Running | default(false)
+    fail_msg: >-
+      Le conteneur warp est introuvable ou arrêté. AllDebrid refuse l'ajout de
+      magnets depuis une IP de serveur (NO_SERVER) : les indexeurs et le broker
+      doivent passer par le proxy warp. Installer d'abord l'application streamfusion.
+
+- name: Vérifier le conteneur Redis StreamFusion
+  community.docker.docker_container_info:
+    name: 'stremio-redis'
+  register: sftorznab_redis_info
+
+- name: Contrôler que Redis StreamFusion est démarré
+  assert:
+    that:
+      - sftorznab_redis_info.exists | default(false)
+      - sftorznab_redis_info.container.State.Running | default(false)
+    fail_msg: >-
+      Le conteneur stremio-redis (StreamFusion) est introuvable ou arrêté.
+      Le quota AllDebrid partagé et le broker en ont besoin. Installer d'abord
+      l'application streamfusion.
+
+- name: Vérifier le conteneur Meilisearch StreamFusion
+  community.docker.docker_container_info:
+    name: 'meilisearch'
+  register: sftorznab_meili_info
+
+- name: Contrôler que Meilisearch StreamFusion est démarré
+  assert:
+    that:
+      - sftorznab_meili_info.exists | default(false)
+      - sftorznab_meili_info.container.State.Running | default(false)
+    fail_msg: >-
+      Le conteneur meilisearch (StreamFusion) est introuvable ou arrêté.
+      L'indexeur Meilisearch en a besoin. Installer d'abord l'application streamfusion.
+
+# ---------------------------------------------------------------
+# Base PostgreSQL StreamFusion
+# ---------------------------------------------------------------
+
+- name: Définir DATABASE_URL personnalisée
+  set_fact:
+    DATABASE_URL: "{{ sftorznab_database_url | string | trim }}"
+  when: sftorznab_database_url is defined and (sftorznab_database_url | string | trim) != ""
+  no_log: true
+
+- name: Lire le mot de passe PostgreSQL runtime StreamFusion
+  slurp:
+    src: "{{ settings.storage }}/docker/{{ lookup('env','USER') }}/streamfusion-secrets/PG_PASS"
+  register: sftorznab_pg_pass_file
+  when: sftorznab_database_url is not defined or (sftorznab_database_url | string | trim) == ""
+  no_log: true
+
+- name: Contrôler la présence du secret PostgreSQL StreamFusion
+  assert:
+    that:
+      - sftorznab_pg_pass_file.content is defined
+      - (sftorznab_pg_pass_file.content | b64decode | trim) | length == 64
+    fail_msg: >-
+      Le secret streamfusion-secrets/PG_PASS est introuvable ou invalide.
+      Installer d'abord l'application streamfusion, ou définir sftorznab_database_url
+      dans une application personnalisée.
+  when: sftorznab_database_url is not defined or (sftorznab_database_url | string | trim) == ""
+  no_log: true
+
+- name: Définir DATABASE_URL par défaut (rôle runtime StreamFusion)
+  set_fact:
+    DATABASE_URL: >-
+      postgresql+asyncpg://streamfusion_runtime:{{ sftorznab_pg_pass_file.content | b64decode | trim }}@stremio-postgres:5432/streamfusion
+  when: sftorznab_database_url is not defined or (sftorznab_database_url | string | trim) == ""
+  no_log: true
+
+# ---------------------------------------------------------------
+# Redis partagé (quota global AllDebrid)
+# ---------------------------------------------------------------
+
+# Nom unique à rectifier si le Redis de StreamFusion change.
+- name: Définir l'URL Redis partagée
+  set_fact:
+    SFTORZNAB_REDIS_URL: "{{ sftorznab_redis_url | default('redis://stremio-redis:6379/0') }}"
+
+# ---------------------------------------------------------------
+# Meilisearch StreamFusion
+# ---------------------------------------------------------------
+
+- name: Lire la clé Meilisearch StreamFusion
+  slurp:
+    src: "{{ settings.storage }}/docker/{{ lookup('env','USER') }}/streamfusion-secrets/MEILI_MASTER_KEY"
+  register: sftorznab_meili_key_file
+  no_log: true
+
+- name: Contrôler la présence du secret Meilisearch StreamFusion
+  assert:
+    that:
+      - sftorznab_meili_key_file.content is defined
+      - (sftorznab_meili_key_file.content | b64decode | trim) | length > 0
+    fail_msg: >-
+      Le secret streamfusion-secrets/MEILI_MASTER_KEY est introuvable.
+      Installer d'abord l'application streamfusion.
+  no_log: true
+
+- name: Définir la clé de recherche Meilisearch
+  set_fact:
+    MEILI_TORZNAB_SEARCH_KEY: "{{ sftorznab_meili_key_file.content | b64decode | trim }}"
+  no_log: true
+
+# ---------------------------------------------------------------
+# AllDebrid
+# ---------------------------------------------------------------
+
+- name: Demander la clé API AllDebrid si elle n'est pas fournie
+  pause:
+    prompt: "Entre ta clé API AllDebrid (https://alldebrid.com/apikeys/)"
+    echo: false
+  register: sftorznab_alldebrid_api_key_prompt
+  when:
+    - sftorznab_alldebrid_cache_only | default('true') | bool
+    - sftorznab_alldebrid_api_key is not defined or (sftorznab_alldebrid_api_key | string | trim) == ""
+  no_log: true
+
+# Les valeurs sont stockées dans un dictionnaire : ansible convertit en booléen
+# toute chaîne 'true'/'false' posée directement en fait, ce que docker_container
+# refuse pour les variables d'environnement.
+- name: Définir les variables AllDebrid
+  set_fact:
+    sftorznab_alldebrid: >-
+      {{ {'api_key': (sftorznab_alldebrid_api_key | default(sftorznab_alldebrid_api_key_prompt.user_input | default(''), true) | string | trim),
+          'cache_only': ('true' if (sftorznab_alldebrid_cache_only | default('true') | bool) else 'false')} }}
+  no_log: true
+
+- name: Définir la variable ALLDEBRID_API_KEY
+  set_fact:
+    ALLDEBRID_API_KEY: "{{ sftorznab_alldebrid.api_key }}"
+  no_log: true
+
+- name: Contrôler la clé API AllDebrid
+  assert:
+    that:
+      - sftorznab_alldebrid.api_key | length > 0
+    fail_msg: >-
+      ALLDEBRID_CACHE_ONLY=true exige une clé API AllDebrid, sinon toutes les
+      recherches renvoient 503. Fournir une clé ou passer
+      sftorznab_alldebrid_cache_only=false dans une application personnalisée.
+  no_log: true
+  when: sftorznab_alldebrid.cache_only | bool
+
+# ---------------------------------------------------------------
+# Exposition Traefik
+# ---------------------------------------------------------------
+
+# Expose les indexeurs via Traefik sur deux sous-domaines :
+#   - sftorznab.<domaine>       : indexeur PostgreSQL
+#   - sftorznab-meili.<domaine> : indexeur Meilisearch
+# Par défaut (non interactif) les indexeurs restent internes au réseau Docker,
+# accessibles par Prowlarr via sftorznab:8080 et sftorznab-meili:8080.
+- name: Demander s'il faut exposer les indexeurs Torznab via Traefik
+  pause:
+    prompt: "Exposer les indexeurs Torznab (PostgreSQL + Meilisearch) via Traefik sur deux sous-domaines (accès public protégé par l'apikey) ? (o/n)"
+  register: sftorznab_expose_public_prompt
+  when: sftorznab_expose_public is not defined
+
+- name: Définir sftorznab_expose_public
+  set_fact:
+    sftorznab_expose_public: >-
+      {{ (sftorznab_expose_public_prompt.user_input | default('', true) | lower | trim)
+         in ['o', 'oui', 'y', 'yes'] }}
+  when: sftorznab_expose_public is not defined
+
+# ---------------------------------------------------------------
+# Secrets persistants
+# ---------------------------------------------------------------
+
+- name: Définir le dossier applicatif
+  set_fact:
+    sftorznab_dir: "{{ settings.storage }}/docker/{{ lookup('env','USER') }}/{{ pgrole }}"
+
+- name: Créer le dossier applicatif
+  file:
+    path: "{{ sftorznab_dir }}"
+    state: directory
+    owner: "{{ lookup('env','USER') }}"
+    group: "{{ lookup('env','USER') }}"
+    mode: '0750'
+  become: true
+
+- name: Générer les secrets persistants
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      umask 077
+      secret_file="{{ sftorznab_dir }}/{{ item }}"
+      if [ ! -s "$secret_file" ]; then
+        openssl rand -hex 32 > "$secret_file"
+        chmod 0600 "$secret_file"
+      fi
+    executable: /bin/bash
+  loop:
+    - INDEXER_API_KEY
+    - MEILI_INDEXER_API_KEY
+    - ALLDEBRID_BROKER_TOKEN
+  changed_when: false
+  no_log: true
+
+- name: Lire les secrets persistants
+  slurp:
+    src: "{{ sftorznab_dir }}/{{ item }}"
+  loop:
+    - INDEXER_API_KEY
+    - MEILI_INDEXER_API_KEY
+    - ALLDEBRID_BROKER_TOKEN
+  register: sftorznab_secret_files
+  no_log: true
+
+- name: Définir les secrets persistants
+  set_fact:
+    INDEXER_API_KEY: "{{ (sftorznab_secret_files.results | selectattr('item', 'equalto', 'INDEXER_API_KEY') | first).content | b64decode | trim }}"
+    MEILI_INDEXER_API_KEY: "{{ (sftorznab_secret_files.results | selectattr('item', 'equalto', 'MEILI_INDEXER_API_KEY') | first).content | b64decode | trim }}"
+    ALLDEBRID_BROKER_TOKEN: "{{ (sftorznab_secret_files.results | selectattr('item', 'equalto', 'ALLDEBRID_BROKER_TOKEN') | first).content | b64decode | trim }}"
+  no_log: true
+
+- name: Contrôler les secrets persistants
+  assert:
+    that:
+      - INDEXER_API_KEY | length >= 32
+      - MEILI_INDEXER_API_KEY | length >= 32
+      - ALLDEBRID_BROKER_TOKEN | length >= 32
+    fail_msg: "Un secret sftorznab persisté est invalide."
+  no_log: true
